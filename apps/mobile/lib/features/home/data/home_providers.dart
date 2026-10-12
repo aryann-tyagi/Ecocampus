@@ -42,9 +42,9 @@ class HomeDashboardStats {
 }
 
 /// Computes report counts from current session state.
-////
-/// Eco Score and level are intentionally unavailable until supported by
-/// verified backend data and approved scoring rules.
+///
+/// Eco Score and level are unavailable until supported by verified backend
+/// data and approved scoring rules.
 final homeDashboardProvider = Provider<HomeDashboardStats>((ref) {
   final reports = ref.watch(reportsProvider);
 
