@@ -80,7 +80,6 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
     );
 
     ref.read(reportsProvider.notifier).addReport(newReport);
-    ref.read(userPointsProvider.notifier).addPoints(30);
 
     if (!mounted) return;
     setState(() => _isSubmitting = false);
@@ -133,7 +132,7 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
               ),
               const SizedBox(height: 16),
               Text(
-                'Report Submitted!',
+                'Report Added',
                 style: AppTextStyles.titleMedium.copyWith(
                   fontWeight: FontWeight.w800,
                   fontSize: 20,
@@ -148,32 +147,9 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF0FAF4),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFBFE9D2)),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.stars_rounded, color: Color(0xFFD98327), size: 20),
-                    SizedBox(width: 6),
-                    Text(
-                      '+30 EcoPoints Earned!',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.inkPrimary,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
               const SizedBox(height: 16),
               Text(
-                'Assigned to ${report.department}. Our team has been notified.',
+                'This report is currently stored only in the app session. Supabase submission and campus-team notifications are not connected yet.',
                 textAlign: TextAlign.center,
                 style: AppTextStyles.bodySmall.copyWith(
                   color: AppColors.inkSecondary,
@@ -562,7 +538,7 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
 
             const SizedBox(height: 24),
 
-            // Submit Button with "+30 EcoPoints" badge
+            // Submit without claiming unimplemented EcoPoints rewards
             SizedBox(
               width: double.infinity,
               height: 56,
@@ -582,34 +558,13 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                         height: 24,
                         child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
                       )
-                    : Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Text(
-                            'Submit report',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: const Text(
-                              '+30 EcoPoints',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
+                    : const Text(
+                        'Submit report',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
               ),
             ),
