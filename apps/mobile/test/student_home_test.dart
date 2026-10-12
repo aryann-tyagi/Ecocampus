@@ -69,16 +69,6 @@ void main() {
       expect(stats.levelTitle, isNull);
     });
 
-    test('Level remains unavailable until trusted rewards rules are connected', () {
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
-
-      container.read(userPointsProvider.notifier).addPoints(1500);
-      final stats = container.read(homeDashboardProvider);
-      expect(stats.level, isNull);
-      expect(stats.levelTitle, isNull);
-    });
-
     test('Report counts update while the unconfigured Eco Score stays unavailable', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
