@@ -17,7 +17,6 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final points = ref.watch(userPointsProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -141,7 +140,7 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '$points EcoPoints',
+                            'EcoPoints ledger not connected yet',
                             style: const TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w800,
