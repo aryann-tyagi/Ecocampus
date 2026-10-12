@@ -55,47 +55,57 @@ void main() {
   });
 
   group('Home Dashboard Provider Tests', () {
-    test('Computes stats, eco score and level correctly from initial state', () {
+    test('Initial dashboard is empty and does not invent scores or levels', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
       final stats = container.read(homeDashboardProvider);
-      expect(stats.totalReports, 4);
-      expect(stats.resolvedReports, 1);
-      expect(stats.activeReports, 3);
-      expect(stats.pendingReports, 1);
-      // Eco Score: 60 + (1/4 * 40) = 70
-      expect(stats.ecoScore, 70);
-      // User points = 420 -> level 5 'Sprout'
-      expect(stats.level, 5);
-      expect(stats.levelTitle, 'Sprout');
+      expect(stats.totalReports, 0);
+      expect(stats.resolvedReports, 0);
+      expect(stats.activeReports, 0);
+      expect(stats.pendingReports, 0);
+      expect(stats.ecoScore, isNull);
+      expect(stats.level, isNull);
+      expect(stats.levelTitle, isNull);
     });
 
-    test('Level tiers adjust dynamically when points change', () {
+    test('Level remains unavailable until trusted rewards rules are connected', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
-      // Add points to reach Protector tier (>= 1500)
-      container.read(userPointsProvider.notifier).addPoints(1100); // 420 + 1100 = 1520
+      container.read(userPointsProvider.notifier).addPoints(1500);
       final stats = container.read(homeDashboardProvider);
-      expect(stats.level, 9);
-      expect(stats.levelTitle, 'Protector');
+      expect(stats.level, isNull);
+      expect(stats.levelTitle, isNull);
     });
 
-    test('Resolving more reports increases eco score estimate', () {
+    test('Report counts update while the unconfigured Eco Score stays unavailable', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
-      final initialScore = container.read(homeDashboardProvider).ecoScore;
+      container.read(reportsProvider.notifier).addReport(
+        ReportModel(
+          id: 'TEST-HOME-001',
+          title: 'Water leak',
+          category: IssueCategory.water,
+          severity: IssueSeverity.medium,
+          location: const CampusLocation(building: 'Engineering Block', floor: 'Ground Floor', area: 'Corridor'),
+          status: ReportStatus.reported,
+          createdAt: DateTime.now(),
+          description: 'A pipe is leaking.',
+        ),
+      );
 
-      // Resolve another report
+      expect(container.read(homeDashboardProvider).totalReports, 1);
       container.read(reportsProvider.notifier).updateReportStatus(
-            'REP-2026-001',
-            ReportStatus.resolved,
-          );
+        'TEST-HOME-001',
+        ReportStatus.resolved,
+      );
 
-      final updatedScore = container.read(homeDashboardProvider).ecoScore;
-      expect(updatedScore > initialScore, true);
+      final updatedStats = container.read(homeDashboardProvider);
+      expect(updatedStats.totalReports, 1);
+      expect(updatedStats.resolvedReports, 1);
+      expect(updatedStats.ecoScore, isNull);
     });
   });
 
