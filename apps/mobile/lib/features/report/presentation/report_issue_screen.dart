@@ -58,7 +58,7 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
     super.dispose();
   }
 
-  void _submitReport() async {
+  void _submitReport() {
     final issueTitle = _titleController.text.trim();
     final description = _descController.text.trim();
     if (issueTitle.isEmpty || description.isEmpty ||
@@ -504,7 +504,9 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  _selectedLocation.area,
+                                  _selectedLocation.area.trim().isEmpty
+                                      ? 'No area selected yet'
+                                      : _selectedLocation.area,
                                   style: AppTextStyles.bodySmall.copyWith(color: AppColors.inkSecondary),
                                 ),
                               ],
