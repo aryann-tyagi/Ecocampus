@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'core/config/supabase_config.dart';
 import 'core/theme/app_theme.dart';
 import 'core/widgets/custom_bottom_nav.dart';
+import 'features/auth/presentation/auth_gate.dart';
+import 'features/home/data/companion_provider.dart';
 import 'features/home/presentation/student_home_screen.dart';
 import 'features/map/presentation/campus_map_screen.dart';
 import 'features/reports_tracking/presentation/my_reports_screen.dart';
 import 'features/rewards/presentation/rewards_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -16,11 +21,30 @@ void main() {
       statusBarIconBrightness: Brightness.dark,
     ),
   );
-  runApp(const ProviderScope(child: EcoCampusApp()));
+
+  final prefs = await SharedPreferences.getInstance();
+
+  if (SupabaseConfig.isConfigured) {
+    await Supabase.initialize(
+      url: SupabaseConfig.url,
+      publishableKey: SupabaseConfig.publishableKey,
+    );
+  }
+
+  runApp(
+    ProviderScope(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+      ],
+      child: const EcoCampusApp(),
+    ),
+  );
 }
 
 class EcoCampusApp extends StatelessWidget {
-  const EcoCampusApp({super.key});
+  final Widget? home;
+
+  const EcoCampusApp({super.key, this.home});
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +52,7 @@ class EcoCampusApp extends StatelessWidget {
       title: 'EcoCampus',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: const MainNavigationShell(),
+      home: home ?? const AuthGate(),
     );
   }
 }
@@ -49,6 +73,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
       StudentHomeScreen(
         onNavigateToReports: () {
           setState(() => _currentIndex = 2);
+        },
+        onNavigateToRewards: () {
+          setState(() => _currentIndex = 3);
         },
       ),
       const CampusMapScreen(),
