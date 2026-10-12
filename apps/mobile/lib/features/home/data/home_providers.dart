@@ -23,11 +23,10 @@ class HomeDashboardStats {
   final int resolvedReports;
   final int pendingReports;
 
-  /// Campus Eco Score — currently a demo estimate derived from resolved ratio.
-  /// Labeled as estimate; not a verified environmental metric.
+  /// Null until verified report analytics are connected.
   final int? ecoScore;
 
-  /// User level derived from points. Demo formula until backend defines it.
+  /// Null until a trusted points ledger and approved level rules are connected.
   final int? level;
   final String? levelTitle;
 
@@ -42,11 +41,10 @@ class HomeDashboardStats {
   });
 }
 
-/// Computes home dashboard statistics from current reports and points state.
-///
-/// Eco Score is a demo estimate: base 60 + up to 40 based on resolved ratio.
-/// Level is derived from points with a simple tier formula.
-/// Both are explicitly labeled as demo/estimate values in the UI.
+/// Computes report counts from current session state.
+////
+/// Eco Score and level are intentionally unavailable until supported by
+/// verified backend data and approved scoring rules.
 final homeDashboardProvider = Provider<HomeDashboardStats>((ref) {
   final reports = ref.watch(reportsProvider);
 
