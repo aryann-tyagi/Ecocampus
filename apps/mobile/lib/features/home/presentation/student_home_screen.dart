@@ -306,9 +306,9 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: const Color(0xFFBBF7D0)),
                       ),
-                      child: const Text(
-                        'ESTIMATE',
-                        style: TextStyle(
+                      child: Text(
+                        stats.ecoScore == null ? 'NOT CONNECTED' : 'ESTIMATE',
+                        style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           color: Color(0xFF15803D),
@@ -319,7 +319,9 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Per PRD §14, Eco Score is an estimated metric calculated from resolution health, campus cleanliness reports, and response speed.',
+                  stats.ecoScore == null
+                      ? 'Eco Score calculations are not connected yet. The report counts below reflect this app session only, not saved campus-wide records.'
+                      : 'Eco Score is an estimate calculated from verified reporting and resolution metrics.',
                   style: AppTextStyles.bodyMedium.copyWith(
                     color: AppColors.inkSecondary,
                     fontSize: 13,
