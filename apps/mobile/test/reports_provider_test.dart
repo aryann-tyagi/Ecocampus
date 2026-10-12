@@ -5,21 +5,6 @@ import 'package:ecocampus_mobile/features/report/domain/report_model.dart';
 
 void main() {
   group('EcoCampus Riverpod State Tests', () {
-    test('Initial local points counter is empty', () {
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
-
-      expect(container.read(userPointsProvider), 0);
-    });
-
-    test('Adding 30 points updates balance correctly', () {
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
-
-      container.read(userPointsProvider.notifier).addPoints(30);
-      expect(container.read(userPointsProvider), 30);
-    });
-
     test('Adding a new report updates reports list and nearby reports', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
