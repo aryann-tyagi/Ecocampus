@@ -155,7 +155,7 @@ void main() {
       );
     });
 
-    testWidgets('Tapping Eco Score card opens estimate details modal', (tester) async {
+    testWidgets('Tapping Eco Score shows that metrics are not connected', (tester) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
@@ -176,7 +176,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
       await tester.pump(const Duration(milliseconds: 400));
 
-      expect(find.text('ESTIMATE'), findsOneWidget);
+      expect(find.text('NOT CONNECTED'), findsOneWidget);
       expect(find.text('Campus Eco Score'), findsWidgets);
       expect(find.text('Got it'), findsOneWidget);
 
