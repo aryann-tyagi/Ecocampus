@@ -1,28 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/report_model.dart';
 
-class UserPointsNotifier extends Notifier<int> {
-  @override
-  int build() => 0;
-
-  void addPoints(int points) {
-    state = state + points;
-  }
-}
-
-final userPointsProvider = NotifierProvider<UserPointsNotifier, int>(UserPointsNotifier.new);
-
-final userLevelProvider = Provider<Map<String, dynamic>>((ref) {
-  final points = ref.watch(userPointsProvider);
-  return {
-    'level': null,
-    'title': 'Not configured',
-    'points': points,
-    'nextRank': null,
-    'totalLevels': null,
-  };
-});
-
+/// In-memory report state for the current app session.
+/// Reports are not persisted to Supabase yet; this provider starts empty.
 class ReportsNotifier extends Notifier<List<ReportModel>> {
   @override
   List<ReportModel> build() => [];
