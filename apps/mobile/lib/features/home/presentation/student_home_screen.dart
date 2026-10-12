@@ -435,7 +435,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Earn EcoPoints by reporting environmental hazards, participating in sustainability challenges, and verifying campus fixes.',
+                  'EcoPoints earning rules are not implemented yet. Reports and other activities will not award points until the rewards system is connected.',
                   style: AppTextStyles.bodyMedium.copyWith(
                     color: AppColors.inkSecondary,
                     fontSize: 13,
