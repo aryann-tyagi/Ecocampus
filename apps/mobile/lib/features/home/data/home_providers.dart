@@ -25,11 +25,11 @@ class HomeDashboardStats {
 
   /// Campus Eco Score — currently a demo estimate derived from resolved ratio.
   /// Labeled as estimate; not a verified environmental metric.
-  final int ecoScore;
+  final int? ecoScore;
 
   /// User level derived from points. Demo formula until backend defines it.
-  final int level;
-  final String levelTitle;
+  final int? level;
+  final String? levelTitle;
 
   const HomeDashboardStats({
     required this.totalReports,
@@ -49,7 +49,6 @@ class HomeDashboardStats {
 /// Both are explicitly labeled as demo/estimate values in the UI.
 final homeDashboardProvider = Provider<HomeDashboardStats>((ref) {
   final reports = ref.watch(reportsProvider);
-  final points = ref.watch(userPointsProvider);
 
   final total = reports.length;
   final resolved =
@@ -62,53 +61,15 @@ final homeDashboardProvider = Provider<HomeDashboardStats>((ref) {
   final pending =
       reports.where((r) => r.status == ReportStatus.reported).length;
 
-  // Demo eco score: base 60 + up to 40 based on resolved ratio.
-  // Labeled as estimate in the UI per PRD §14 and project rules.
-  final resolvedRatio = total > 0 ? resolved / total : 0.0;
-  final ecoScore = (60 + (resolvedRatio * 40)).round().clamp(0, 100);
-
-  // Demo level tiers derived from points.
-  final int level;
-  final String levelTitle;
-  if (points >= 2000) {
-    level = 10;
-    levelTitle = 'Guardian';
-  } else if (points >= 1500) {
-    level = 9;
-    levelTitle = 'Protector';
-  } else if (points >= 1000) {
-    level = 8;
-    levelTitle = 'Champion';
-  } else if (points >= 800) {
-    level = 7;
-    levelTitle = 'Advocate';
-  } else if (points >= 600) {
-    level = 6;
-    levelTitle = 'Explorer';
-  } else if (points >= 400) {
-    level = 5;
-    levelTitle = 'Sprout';
-  } else if (points >= 250) {
-    level = 4;
-    levelTitle = 'Seedling';
-  } else if (points >= 120) {
-    level = 3;
-    levelTitle = 'Sapling';
-  } else if (points >= 50) {
-    level = 2;
-    levelTitle = 'Bud';
-  } else {
-    level = 1;
-    levelTitle = 'Newcomer';
-  }
-
+  // No score or level is displayed until an approved calculation and trusted
+  // points ledger are connected to the backend.
   return HomeDashboardStats(
     totalReports: total,
     activeReports: active,
     resolvedReports: resolved,
     pendingReports: pending,
-    ecoScore: ecoScore,
-    level: level,
-    levelTitle: levelTitle,
+    ecoScore: null,
+    level: null,
+    levelTitle: null,
   );
 });
