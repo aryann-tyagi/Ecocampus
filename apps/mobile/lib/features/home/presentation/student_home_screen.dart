@@ -366,7 +366,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
     );
   }
 
-  void _showLevelDetails(BuildContext context, HomeDashboardStats stats, int points) {
+  void _showLevelDetails(BuildContext context, HomeDashboardStats stats) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -513,7 +513,6 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
     final profile = ref.read(userProfileProvider).value;
     final user = ref.read(currentUserProvider);
     final stats = ref.read(homeDashboardProvider);
-    final points = ref.read(userPointsProvider);
     final companionName = ref.read(companionNameProvider);
 
     showModalBottomSheet(
@@ -840,7 +839,6 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final points = ref.watch(userPointsProvider);
     final nearbyIssues = ref.watch(nearbyReportsProvider);
     final companionName = ref.watch(companionNameProvider);
     final greeting = ref.watch(greetingProvider);
@@ -968,7 +966,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                 const SizedBox(height: 20),
 
                 // 2. Mascot Hero Card (Sprig / Custom Companion)
-                _buildSprigHeroCard(context, companionName, stats, points),
+                _buildSprigHeroCard(context, companionName, stats),
 
                 const SizedBox(height: 22),
 
@@ -1136,7 +1134,6 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
     BuildContext context,
     String companionName,
     HomeDashboardStats stats,
-    int points,
   ) {
     return Container(
       width: double.infinity,
@@ -1371,7 +1368,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: () => _showLevelDetails(context, stats, points),
+                    onTap: () => _showLevelDetails(context, stats),
                     borderRadius: BorderRadius.circular(20),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
