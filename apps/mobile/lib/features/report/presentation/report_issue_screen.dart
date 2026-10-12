@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/widgets/sprig_mascot.dart';
 import '../data/reports_provider.dart';
 import '../domain/report_model.dart';
 
@@ -85,7 +84,6 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
       status: ReportStatus.reported,
       createdAt: DateTime.now(),
       description: description,
-      department: _getSuggestedDepartment(_selectedCategory),
     );
 
     ref.read(reportsProvider.notifier).addReport(newReport);
@@ -96,24 +94,6 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
     _showSuccessReceiptDialog(newReport);
   }
 
-  String _getSuggestedDepartment(IssueCategory category) {
-    switch (category) {
-      case IssueCategory.waste:
-        return 'Sanitation & Grounds';
-      case IssueCategory.water:
-        return 'Plumbing & Facilities';
-      case IssueCategory.electricity:
-        return 'Electrical Maintenance';
-      case IssueCategory.infrastructure:
-        return 'Campus Infrastructure';
-      case IssueCategory.greenery:
-        return 'Horticulture & Landscape';
-      case IssueCategory.cleanliness:
-        return 'Housekeeping';
-      case IssueCategory.other:
-        return 'General Operations';
-    }
-  }
 
   void _showSuccessReceiptDialog(ReportModel report) {
     showDialog(
@@ -517,7 +497,9 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  '${_selectedLocation.building} · ${_selectedLocation.floor}',
+                                  _selectedLocation.floor.trim().isEmpty || _selectedLocation.area.trim().isEmpty
+                                      ? 'Tap to choose building, floor & area'
+                                      : '${_selectedLocation.building} · ${_selectedLocation.floor}',
                                   style: AppTextStyles.labelLarge.copyWith(fontWeight: FontWeight.w700),
                                 ),
                                 const SizedBox(height: 2),
