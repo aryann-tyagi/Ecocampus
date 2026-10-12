@@ -20,7 +20,7 @@ const List<String> _kCompanionTips = [
   "Reporting a dripping tap can save over 5,000 liters of water a year!",
   "Turn off classroom projectors when leaving to conserve energy.",
   "Sorted recycling helps divert 80% of waste from landfills.",
-  "Every verified report earns you EcoPoints towards campus rewards!",
+  "EcoPoints will appear here once the rewards system is connected.",
 ];
 
 class StudentHomeScreen extends ConsumerStatefulWidget {
@@ -288,7 +288,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                               ),
                             ),
                             Text(
-                              '${stats.ecoScore} / 100',
+                              stats.ecoScore == null ? 'Not set up yet' : '${stats.ecoScore} / 100',
                               style: const TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w700,
@@ -413,14 +413,14 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Level ${stats.level} · ${stats.levelTitle}',
+                          stats.level == null ? 'Levels not configured yet' : 'Level ${stats.level} · ${stats.levelTitle}',
                           style: AppTextStyles.titleMedium.copyWith(
                             fontWeight: FontWeight.w800,
                             fontSize: 18,
                           ),
                         ),
                         Text(
-                          '$points EcoPoints earned',
+                          'EcoPoints ledger not connected yet',
                           style: const TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -591,7 +591,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                     Column(
                       children: [
                         Text(
-                          '$points',
+                          '—',
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
@@ -612,7 +612,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                     Column(
                       children: [
                         Text(
-                          stats.levelTitle,
+                          stats.levelTitle ?? 'Not set up',
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
@@ -621,7 +621,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Level ${stats.level}',
+                          stats.level == null ? 'Level not configured' : 'Level ${stats.level}',
                           style: AppTextStyles.bodySmall.copyWith(
                             color: AppColors.inkSecondary,
                             fontSize: 11,
@@ -924,7 +924,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
-                                  '$points',
+                                  '—',
                                   style: const TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w800,
@@ -1340,7 +1340,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                             textBaseline: TextBaseline.alphabetic,
                             children: [
                               Text(
-                                '${stats.ecoScore}',
+                                stats.ecoScore?.toString() ?? '—',
                                 style: const TextStyle(
                                   fontSize: 24,
                                   fontWeight: FontWeight.w900,
@@ -1430,7 +1430,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                             textBaseline: TextBaseline.alphabetic,
                             children: [
                               Text(
-                                '${stats.level}',
+                                stats.level?.toString() ?? '—',
                                 style: const TextStyle(
                                   fontSize: 24,
                                   fontWeight: FontWeight.w900,
@@ -1440,7 +1440,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
-                                  stats.levelTitle,
+                                  stats.levelTitle ?? 'Not set up',
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
