@@ -16,10 +16,10 @@ import '../data/home_providers.dart';
 
 /// Sustainability tips cycled when tapping the mascot speech bubble.
 const List<String> _kCompanionTips = [
-  "Spotted something on campus? Snap it, I'll sort the rest!",
-  "Reporting a dripping tap can save over 5,000 liters of water a year!",
-  "Turn off classroom projectors when leaving to conserve energy.",
-  "Sorted recycling helps divert 80% of waste from landfills.",
+  "Notice a campus issue? Describe it and choose its location.",
+  "Report dripping taps so the facilities team can investigate.",
+  "Turn off classroom projectors when they are not needed.",
+  "Separate waste according to your campus recycling guidance.",
   "EcoPoints will appear here once the rewards system is connected.",
 ];
 
