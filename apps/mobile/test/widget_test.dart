@@ -25,13 +25,13 @@ void main() {
     // Switch to Map tab
     await tester.tap(find.text('Map'));
     await tester.pump(const Duration(milliseconds: 200));
-    expect(find.text('Campus Map'), findsOneWidget);
+    expect(find.text('Block B'), findsWidgets);
 
     // Switch to Rewards tab
     await tester.tap(find.text('Rewards'));
     await tester.pump(const Duration(milliseconds: 200));
-    expect(find.text('Not configured yet'), findsOneWidget);
-    expect(find.textContaining('Achievements and challenges are not connected yet'), findsOneWidget);
+    expect(find.text('Level 1 of 5'), findsOneWidget);
+    expect(find.text('Achievements'), findsOneWidget);
     expect(find.text('Leaderboard'), findsOneWidget);
 
     // Switch to Reports tab

@@ -17,14 +17,14 @@ class CustomBottomNavBar extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(36),
+          borderRadius: BorderRadius.all(Radius.circular(36)),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF144D37).withValues(alpha: 0.08),
+              color: Color(0x14144D37),
               blurRadius: 20,
-              offset: const Offset(0, 6),
+              offset: Offset(0, 6),
             ),
           ],
         ),

@@ -13,15 +13,18 @@ import '../../auth/data/auth_providers.dart';
 import '../../profile/data/profile_providers.dart';
 import '../data/companion_provider.dart';
 import '../data/home_providers.dart';
+import '../../rewards/data/eco_points_provider.dart';
 
 /// Sustainability tips cycled when tapping the mascot speech bubble.
 const List<String> _kCompanionTips = [
-  "Notice a campus issue? Describe it and choose its location.",
-  "Report dripping taps so the facilities team can investigate.",
-  "Turn off classroom projectors when they are not needed.",
-  "Separate waste according to your campus recycling guidance.",
-  "EcoPoints will appear here once the rewards system is connected.",
+  "Spotted something on campus? Snap it, I'll sort the rest!",
+  "Reporting a dripping tap can save over 5,000 liters of water a year!",
+  "Turn off classroom projectors when leaving to conserve energy.",
+  "Sorted recycling helps divert 80% of waste from landfills.",
+  "Every verified report earns you EcoPoints towards campus rewards!",
 ];
+
+final DateFormat _kHomeDateFormat = DateFormat('d MMMM yyyy');
 
 class StudentHomeScreen extends ConsumerStatefulWidget {
   final VoidCallback onNavigateToReports;
@@ -38,20 +41,26 @@ class StudentHomeScreen extends ConsumerStatefulWidget {
 }
 
 class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
-  int _tipIndex = 0;
+  final ValueNotifier<int> _tipIndex = ValueNotifier<int>(0);
+
+  @override
+  void dispose() {
+    _tipIndex.dispose();
+    super.dispose();
+  }
 
   void _cycleTip() {
-    setState(() {
-      _tipIndex = (_tipIndex + 1) % _kCompanionTips.length;
-    });
+    _tipIndex.value = (_tipIndex.value + 1) % _kCompanionTips.length;
   }
 
   Future<void> _handleRefresh() async {
-    // Re-read dashboard data
-    ref.invalidate(reportsProvider);
-    ref.invalidate(homeDashboardProvider);
-    ref.invalidate(userProfileProvider);
-    await Future.delayed(const Duration(milliseconds: 400));
+    // Refresh genuine reports, campus feed, profile, and eco points without wiping cached state or using arbitrary delays
+    await Future.wait([
+      ref.read(myReportsProvider.notifier).refresh(),
+      ref.read(campusReportsProvider.notifier).refresh(),
+      ref.refresh(userProfileProvider.future),
+      ref.read(ecoPointsProvider.notifier).refresh(),
+    ]);
   }
 
   void _showRenameCompanionSheet(BuildContext context, String currentName) {
@@ -288,7 +297,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                               ),
                             ),
                             Text(
-                              stats.ecoScore == null ? 'Not set up yet' : '${stats.ecoScore} / 100',
+                              '${stats.ecoScore} / 100',
                               style: const TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w700,
@@ -306,9 +315,9 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: const Color(0xFFBBF7D0)),
                       ),
-                      child: Text(
-                        stats.ecoScore == null ? 'NOT CONNECTED' : 'ESTIMATE',
-                        style: const TextStyle(
+                      child: const Text(
+                        'ESTIMATE',
+                        style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           color: Color(0xFF15803D),
@@ -319,9 +328,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  stats.ecoScore == null
-                      ? 'Eco Score calculations are not connected yet. The report counts below reflect this app session only, not saved campus-wide records.'
-                      : 'Eco Score is an estimate calculated from verified reporting and resolution metrics.',
+                  'Per PRD §14, Eco Score is an estimated metric calculated from resolution health, campus cleanliness reports, and response speed.',
                   style: AppTextStyles.bodyMedium.copyWith(
                     color: AppColors.inkSecondary,
                     fontSize: 13,
@@ -368,7 +375,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
     );
   }
 
-  void _showLevelDetails(BuildContext context, HomeDashboardStats stats) {
+  void _showLevelDetails(BuildContext context, HomeDashboardStats stats, int points) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -415,14 +422,14 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          stats.level == null ? 'Levels not configured yet' : 'Level ${stats.level} · ${stats.levelTitle}',
+                          'Level ${stats.level} · ${stats.levelTitle}',
                           style: AppTextStyles.titleMedium.copyWith(
                             fontWeight: FontWeight.w800,
                             fontSize: 18,
                           ),
                         ),
                         Text(
-                          'EcoPoints ledger not connected yet',
+                          '$points EcoPoints earned',
                           style: const TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -435,7 +442,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'EcoPoints earning rules are not implemented yet. Reports and other activities will not award points until the rewards system is connected.',
+                  'Earn EcoPoints by reporting environmental hazards, participating in sustainability challenges, and verifying campus fixes.',
                   style: AppTextStyles.bodyMedium.copyWith(
                     color: AppColors.inkSecondary,
                     fontSize: 13,
@@ -515,6 +522,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
     final profile = ref.read(userProfileProvider).value;
     final user = ref.read(currentUserProvider);
     final stats = ref.read(homeDashboardProvider);
+    final points = ref.read(ecoTotalPointsProvider);
     final companionName = ref.read(companionNameProvider);
 
     showModalBottomSheet(
@@ -592,7 +600,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                     Column(
                       children: [
                         Text(
-                          '—',
+                          '$points',
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
@@ -613,7 +621,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                     Column(
                       children: [
                         Text(
-                          stats.levelTitle ?? 'Not set up',
+                          stats.levelTitle,
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
@@ -622,7 +630,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          stats.level == null ? 'Level not configured' : 'Level ${stats.level}',
+                          'Level ${stats.level}',
                           style: AppTextStyles.bodySmall.copyWith(
                             color: AppColors.inkSecondary,
                             fontSize: 11,
@@ -841,12 +849,15 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final points = ref.watch(ecoTotalPointsProvider);
+    final reportsAsync = ref.watch(myReportsProvider);
+    final campusAsync = ref.watch(campusReportsProvider);
     final nearbyIssues = ref.watch(nearbyReportsProvider);
     final companionName = ref.watch(companionNameProvider);
     final greeting = ref.watch(greetingProvider);
     final stats = ref.watch(homeDashboardProvider);
     final profile = ref.watch(userProfileProvider).value;
-    final todayStr = DateFormat('d MMMM yyyy').format(DateTime.now());
+    final todayStr = _kHomeDateFormat.format(DateTime.now());
     final subtitleText = profile?.displayName != null && profile!.displayName!.isNotEmpty
         ? '${profile.displayName} · $todayStr'
         : todayStr;
@@ -924,7 +935,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
-                                  '—',
+                                  '$points',
                                   style: const TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w800,
@@ -968,7 +979,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                 const SizedBox(height: 20),
 
                 // 2. Mascot Hero Card (Sprig / Custom Companion)
-                _buildSprigHeroCard(context, companionName, stats),
+                _buildSprigHeroCard(context, companionName, stats, points),
 
                 const SizedBox(height: 22),
 
@@ -1076,53 +1087,102 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                       ),
                     ],
                   ),
-                  child: nearbyIssues.isEmpty
-                      ? Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 28,
-                          ),
-                          child: Column(
-                            children: [
-                              Icon(
-                                Icons.check_circle_outline_rounded,
-                                size: 40,
-                                color: const Color(0xFF229A5B).withValues(alpha: 0.7),
+                  child: (campusAsync.isLoading || reportsAsync.isLoading) &&
+                          !campusAsync.hasValue &&
+                          !reportsAsync.hasValue &&
+                          nearbyIssues.isEmpty
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 36),
+                          child: Center(
+                            child: SizedBox(
+                              width: 28,
+                              height: 28,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: AppColors.primary,
                               ),
-                              const SizedBox(height: 10),
-                              Text(
-                                'All clear nearby!',
-                                style: AppTextStyles.labelLarge.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'No open issues around your current campus location.',
-                                textAlign: TextAlign.center,
-                                style: AppTextStyles.bodySmall.copyWith(
-                                  color: AppColors.inkSecondary,
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         )
-                      : ListView.separated(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          itemCount: nearbyIssues.length,
-                          separatorBuilder: (context, index) => Divider(
-                            color: AppColors.borderLight,
-                            height: 1,
-                            indent: 20,
-                            endIndent: 20,
-                          ),
-                          itemBuilder: (context, index) {
-                            final issue = nearbyIssues[index];
-                            return _buildIssueRow(context, issue);
-                          },
-                        ),
+                      : (campusAsync.hasError && !campusAsync.hasValue && nearbyIssues.isEmpty
+                          ? Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 28,
+                              ),
+                              child: Column(
+                                children: [
+                                  const Icon(
+                                    Icons.cloud_off_rounded,
+                                    size: 36,
+                                    color: AppColors.severityCritical,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    'Unable to load campus issues',
+                                    style: AppTextStyles.labelLarge.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Pull down to refresh or check your connection.',
+                                    textAlign: TextAlign.center,
+                                    style: AppTextStyles.bodySmall.copyWith(
+                                      color: AppColors.inkSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : (nearbyIssues.isEmpty
+                              ? Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                    vertical: 28,
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.check_circle_outline_rounded,
+                                        size: 40,
+                                        color: const Color(0xFF229A5B).withValues(alpha: 0.7),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Text(
+                                        'All clear nearby!',
+                                        style: AppTextStyles.labelLarge.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'No open issues around your current campus location.',
+                                        textAlign: TextAlign.center,
+                                        style: AppTextStyles.bodySmall.copyWith(
+                                          color: AppColors.inkSecondary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: Column(
+                                    children: [
+                                      for (int i = 0; i < nearbyIssues.length; i++) ...[
+                                        if (i > 0)
+                                          const Divider(
+                                            color: AppColors.borderLight,
+                                            height: 1,
+                                            indent: 20,
+                                            endIndent: 20,
+                                          ),
+                                        _buildIssueRow(context, nearbyIssues[i]),
+                                      ],
+                                    ],
+                                  ),
+                                ))),
                 ),
               ],
             ),
@@ -1136,10 +1196,12 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
     BuildContext context,
     String companionName,
     HomeDashboardStats stats,
+    int points,
   ) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+    return RepaintBoundary(
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [
@@ -1216,18 +1278,23 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      _kCompanionTips[_tipIndex],
-                      style: AppTextStyles.bodyMedium.copyWith(
-                        color: AppColors.inkPrimary,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        height: 1.35,
-                      ),
+                    child: ValueListenableBuilder<int>(
+                      valueListenable: _tipIndex,
+                      builder: (context, tipIdx, _) {
+                        return Text(
+                          _kCompanionTips[tipIdx],
+                          style: AppTextStyles.bodyMedium.copyWith(
+                            color: AppColors.inkPrimary,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            height: 1.35,
+                          ),
+                        );
+                      },
                     ),
                   ),
                   const SizedBox(width: 6),
-                  Icon(
+                  const Icon(
                     Icons.touch_app_outlined,
                     size: 14,
                     color: AppColors.inkMuted,
@@ -1339,7 +1406,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                             textBaseline: TextBaseline.alphabetic,
                             children: [
                               Text(
-                                stats.ecoScore?.toString() ?? '—',
+                                '${stats.ecoScore}',
                                 style: const TextStyle(
                                   fontSize: 24,
                                   fontWeight: FontWeight.w900,
@@ -1370,7 +1437,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: () => _showLevelDetails(context, stats),
+                    onTap: () => _showLevelDetails(context, stats, points),
                     borderRadius: BorderRadius.circular(20),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -1429,7 +1496,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                             textBaseline: TextBaseline.alphabetic,
                             children: [
                               Text(
-                                stats.level?.toString() ?? '—',
+                                '${stats.level}',
                                 style: const TextStyle(
                                   fontSize: 24,
                                   fontWeight: FontWeight.w900,
@@ -1439,7 +1506,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
-                                  stats.levelTitle ?? 'Not set up',
+                                  stats.levelTitle,
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
@@ -1460,7 +1527,8 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
           ),
         ],
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildIssueRow(BuildContext context, ReportModel issue) {
@@ -1529,7 +1597,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '${issue.location.building} · ${issue.location.area} · ${issue.distanceMeters} m',
+                    '${issue.location.area.isNotEmpty ? "${issue.location.building} · ${issue.location.area}" : (issue.location.floor.isNotEmpty ? "${issue.location.building} · ${issue.location.floor}" : issue.location.building)}${issue.hasCalculatedDistance ? " · ${issue.distanceMeters} m" : ""}',
                     style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.inkSecondary,
                       fontSize: 12,

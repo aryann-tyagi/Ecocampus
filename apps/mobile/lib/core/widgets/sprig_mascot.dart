@@ -55,21 +55,31 @@ class _SprigMascotState extends State<SprigMascot>
 
   @override
   Widget build(BuildContext context) {
+    final mascotCanvas = RepaintBoundary(
+      child: CustomPaint(
+        size: Size(widget.size, widget.size),
+        isComplex: true,
+        willChange: false,
+        painter: _SprigPainter(
+          blinkValue: 0.0, // Stable friendly gaze
+        ),
+      ),
+    );
+
+    if (!widget.animated) {
+      return mascotCanvas;
+    }
+
     return AnimatedBuilder(
       animation: _controller,
+      child: mascotCanvas,
       builder: (context, child) {
-        final double bobOffset = widget.animated
-            ? math.sin(_controller.value * math.pi) * (widget.size * 0.03)
-            : 0;
+        final double bobOffset =
+            math.sin(_controller.value * math.pi) * (widget.size * 0.03);
 
         return Transform.translate(
           offset: Offset(0, -bobOffset),
-          child: CustomPaint(
-            size: Size(widget.size, widget.size),
-            painter: _SprigPainter(
-              blinkValue: 0.0, // Stable friendly gaze
-            ),
-          ),
+          child: child,
         );
       },
     );

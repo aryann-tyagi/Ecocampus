@@ -44,6 +44,15 @@ class CompanionNameNotifier extends Notifier<String> {
     }
   }
 
+  /// Resets companion name to default ('Sprig') on sign-out and account switches.
+  void resetToDefault() {
+    final prefs = ref.read(sharedPreferencesProvider);
+    if (prefs != null) {
+      prefs.remove(_kCompanionNameKey);
+    }
+    state = kDefaultCompanionName;
+  }
+
   /// Validates and persists a new companion name.
   ///
   /// Updates local storage immediately. If the student is authenticated with Supabase,

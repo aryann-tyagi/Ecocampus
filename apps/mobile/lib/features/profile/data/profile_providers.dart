@@ -8,14 +8,24 @@ import 'profile_repository.dart';
 /// Notifier that manages loading and updating the current user's [UserProfile].
 class UserProfileNotifier extends AsyncNotifier<UserProfile?> {
   @override
-  FutureOr<UserProfile?> build() async {
+  FutureOr<UserProfile?> build() {
     final user = ref.watch(currentUserProvider);
     if (user == null) {
       return null;
     }
 
+    return _fetchProfile(user.id);
+  }
+
+  Future<UserProfile?> _fetchProfile(String userId) async {
     final repo = ref.watch(profileRepositoryProvider);
-    final profile = await repo.getProfile(user.id);
+    final profile = await repo.getProfile(userId);
+
+    // Race condition check: Ensure the authenticated user hasn't changed during fetch
+    final current = ref.read(currentUserProvider);
+    if (current?.id != userId) {
+      return null;
+    }
 
     // If a companion name exists in Supabase, sync it to companionNameProvider and local disk
     if (profile?.companionName != null && profile!.companionName!.isNotEmpty) {

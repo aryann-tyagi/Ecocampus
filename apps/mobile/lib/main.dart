@@ -49,7 +49,7 @@ class EcoCampusApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'EcoCampus',
+      title: 'Eco Campus',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       home: home ?? const AuthGate(),
@@ -69,30 +69,30 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 
   @override
   Widget build(BuildContext context) {
-    final List<Widget> screens = [
-      StudentHomeScreen(
-        onNavigateToReports: () {
-          setState(() => _currentIndex = 2);
-        },
-        onNavigateToRewards: () {
-          setState(() => _currentIndex = 3);
-        },
-      ),
-      const CampusMapScreen(),
-      const MyReportsScreen(),
-      const RewardsScreen(),
-    ];
-
     return Scaffold(
       extendBody: true,
       body: IndexedStack(
         index: _currentIndex,
-        children: screens,
+        children: [
+          StudentHomeScreen(
+            onNavigateToReports: () {
+              if (mounted) setState(() => _currentIndex = 2);
+            },
+            onNavigateToRewards: () {
+              if (mounted) setState(() => _currentIndex = 3);
+            },
+          ),
+          const CampusMapScreen(),
+          const MyReportsScreen(),
+          RewardsScreen(isActive: _currentIndex == 3),
+        ],
       ),
       bottomNavigationBar: CustomBottomNavBar(
         currentIndex: _currentIndex,
         onTap: (index) {
-          setState(() => _currentIndex = index);
+          if (_currentIndex != index) {
+            setState(() => _currentIndex = index);
+          }
         },
       ),
     );

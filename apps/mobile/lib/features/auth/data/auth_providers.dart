@@ -2,6 +2,15 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_repository.dart';
+import '../../home/data/companion_provider.dart';
+import '../../profile/data/profile_providers.dart';
+import '../../report/data/reports_provider.dart';
+import '../../report/data/reports_repository.dart';
+import '../../rewards/data/eco_points_provider.dart';
+import '../../rewards/data/achievements_repository.dart';
+import '../../rewards/data/achievements_provider.dart';
+import '../../rewards/data/challenges_repository.dart';
+import '../../rewards/data/challenges_provider.dart';
 
 /// Stream of auth changes emitted by Supabase.
 final authStateChangesProvider = StreamProvider<AuthState>((ref) {
@@ -57,6 +66,19 @@ class AuthController extends Notifier<void> {
           .timeout(const Duration(seconds: 15));
 
       if (res.user != null) {
+        ref.read(reportsRepositoryProvider).clearCache();
+        ref.read(achievementsRepositoryProvider).clearCache();
+        ref.read(challengesRepositoryProvider).clearCache();
+        ref.read(companionNameProvider.notifier).resetToDefault();
+        ref.invalidate(reportsProvider);
+        ref.invalidate(myReportsProvider);
+        ref.invalidate(campusReportsProvider);
+        ref.invalidate(ecoPointsProvider);
+        ref.invalidate(leaderboardProvider);
+        ref.invalidate(ecoPointEventsProvider);
+        ref.invalidate(userProfileProvider);
+        ref.invalidate(achievementsProvider);
+        ref.invalidate(dailyChallengesProvider);
         return const AuthResult.success();
       } else {
         return const AuthResult.failure('Authentication failed. Please try again.');
@@ -127,13 +149,28 @@ class AuthController extends Notifier<void> {
     }
   }
 
-  /// Signs the user out of their session.
+  /// Signs the user out of their session and clears all user-scoped state.
   Future<void> signOut() async {
     try {
       final repo = ref.read(authRepositoryProvider);
       await repo.signOut().timeout(const Duration(seconds: 10));
     } catch (_) {
       // Ignore signOut network errors to always allow offline logout
+    } finally {
+      // Clear in-memory caches and invalidate user-scoped providers
+      ref.read(reportsRepositoryProvider).clearCache();
+      ref.read(achievementsRepositoryProvider).clearCache();
+      ref.read(challengesRepositoryProvider).clearCache();
+      ref.read(companionNameProvider.notifier).resetToDefault();
+      ref.invalidate(reportsProvider);
+      ref.invalidate(myReportsProvider);
+      ref.invalidate(campusReportsProvider);
+      ref.invalidate(ecoPointsProvider);
+      ref.invalidate(leaderboardProvider);
+      ref.invalidate(ecoPointEventsProvider);
+      ref.invalidate(userProfileProvider);
+      ref.invalidate(achievementsProvider);
+      ref.invalidate(dailyChallengesProvider);
     }
   }
 

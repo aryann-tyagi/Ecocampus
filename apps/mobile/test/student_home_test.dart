@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +8,8 @@ import 'package:ecocampus_mobile/features/home/data/home_providers.dart';
 import 'package:ecocampus_mobile/features/home/presentation/student_home_screen.dart';
 import 'package:ecocampus_mobile/features/report/data/reports_provider.dart';
 import 'package:ecocampus_mobile/features/report/domain/report_model.dart';
+import 'package:ecocampus_mobile/features/rewards/data/eco_points_provider.dart';
+import 'package:ecocampus_mobile/features/rewards/domain/eco_points_model.dart';
 
 void main() {
   group('Companion Provider Tests', () {
@@ -55,7 +58,7 @@ void main() {
   });
 
   group('Home Dashboard Provider Tests', () {
-    test('Initial dashboard is empty and does not invent scores or levels', () {
+    test('Computes stats, eco score and level correctly from clean initial state', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
@@ -64,38 +67,91 @@ void main() {
       expect(stats.resolvedReports, 0);
       expect(stats.activeReports, 0);
       expect(stats.pendingReports, 0);
-      expect(stats.ecoScore, isNull);
-      expect(stats.level, isNull);
-      expect(stats.levelTitle, isNull);
+      // Clean base eco score: genuine 0 (no preset 60/100 default)
+      expect(stats.ecoScore, 0);
+      // Clean initial user points = 0 -> level 1 'Seedling'
+      expect(stats.level, 1);
+      expect(stats.levelTitle, 'Seedling');
     });
 
-    test('Report counts update while the unconfigured Eco Score stays unavailable', () {
+    test('Computes report breakdown correctly when reports are populated', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
-      container.read(reportsProvider.notifier).addReport(
+      container.read(reportsProvider.notifier).setReports([
         ReportModel(
-          id: 'TEST-HOME-001',
-          title: 'Water leak',
+          id: 'REP-101',
+          title: 'Resolved Issue',
+          description: 'Fixed',
           category: IssueCategory.water,
-          severity: IssueSeverity.medium,
-          location: const CampusLocation(building: 'Engineering Block', floor: 'Ground Floor', area: 'Corridor'),
-          status: ReportStatus.reported,
+          severity: IssueSeverity.low,
+          status: ReportStatus.resolved,
+          location: const CampusLocation(building: 'Block A', floor: '1st Floor', area: 'Main'),
           createdAt: DateTime.now(),
-          description: 'A pipe is leaking.',
         ),
-      );
+        ReportModel(
+          id: 'REP-102',
+          title: 'Active Issue',
+          description: 'In progress',
+          category: IssueCategory.electricity,
+          severity: IssueSeverity.medium,
+          status: ReportStatus.inProgress,
+          location: const CampusLocation(building: 'Block B', floor: '2nd Floor', area: 'Lab'),
+          createdAt: DateTime.now(),
+        ),
+      ]);
 
-      expect(container.read(homeDashboardProvider).totalReports, 1);
+      final stats = container.read(homeDashboardProvider);
+      expect(stats.totalReports, 2);
+      expect(stats.resolvedReports, 1);
+      expect(stats.activeReports, 1);
+      expect(stats.pendingReports, 0);
+    });
+
+    test('Level tiers adjust dynamically when points change per live DB rules', () {
+      final container = ProviderContainer(
+        overrides: [
+          ecoPointsProvider.overrideWith(() => _TestEcoPointsNotifier(
+                EcoPointsSummary.fromTotals(totalPoints: 250, eventCount: 5),
+              )),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final stats = container.read(homeDashboardProvider);
+      expect(stats.level, 4);
+      expect(stats.levelTitle, 'Tree');
+      expect(stats.ecoScore, 100);
+    });
+
+    test('Updating report status correctly updates report breakdown counts', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      container.read(reportsProvider.notifier).setReports([
+        ReportModel(
+          id: 'REP-101',
+          title: 'Leaking Tap',
+          description: 'Dripping tap',
+          category: IssueCategory.water,
+          severity: IssueSeverity.high,
+          status: ReportStatus.reported,
+          location: const CampusLocation(building: 'Engineering', floor: 'Ground Floor', area: 'Restroom'),
+          createdAt: DateTime.now(),
+        ),
+      ]);
+
+      expect(container.read(homeDashboardProvider).pendingReports, 1);
+      expect(container.read(homeDashboardProvider).resolvedReports, 0);
+
+      // Resolve the report
       container.read(reportsProvider.notifier).updateReportStatus(
-        'TEST-HOME-001',
-        ReportStatus.resolved,
-      );
+            'REP-101',
+            ReportStatus.resolved,
+          );
 
-      final updatedStats = container.read(homeDashboardProvider);
-      expect(updatedStats.totalReports, 1);
-      expect(updatedStats.resolvedReports, 1);
-      expect(updatedStats.ecoScore, isNull);
+      expect(container.read(homeDashboardProvider).resolvedReports, 1);
+      expect(container.read(homeDashboardProvider).pendingReports, 0);
     });
   });
 
@@ -155,7 +211,7 @@ void main() {
       );
     });
 
-    testWidgets('Tapping Eco Score shows that metrics are not connected', (tester) async {
+    testWidgets('Tapping Eco Score card opens estimate details modal', (tester) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
@@ -176,7 +232,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
       await tester.pump(const Duration(milliseconds: 400));
 
-      expect(find.text('NOT CONNECTED'), findsOneWidget);
+      expect(find.text('ESTIMATE'), findsOneWidget);
       expect(find.text('Campus Eco Score'), findsWidgets);
       expect(find.text('Got it'), findsOneWidget);
 
@@ -220,5 +276,145 @@ void main() {
       // Verify companion name updated on home screen
       expect(find.text('Leafy'), findsOneWidget);
     });
+
+    testWidgets('Empty state displays "All clear nearby!" and never renders mock reports', (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            greetingProvider.overrideWithValue('Good morning'),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: StudentHomeScreen(
+              onNavigateToReports: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(find.text('All clear nearby!'), findsOneWidget);
+      expect(find.text('No open issues around your current campus location.'), findsOneWidget);
+      // Verify hardcoded/mock reports never appear
+      expect(find.text('REP-2026-001'), findsNothing);
+      expect(find.text('Broken Solar Inverter Display'), findsNothing);
+      expect(find.text('Leaking Water Cooler Tap'), findsNothing);
+      expect(find.text('Unsorted Recyclables Overflow'), findsNothing);
+    });
+
+    testWidgets('Renders genuine report entries and does not invent mock reports', (tester) async {
+      final genuineReports = [
+        ReportModel(
+          id: 'genuine-uuid-1',
+          title: 'Genuine Library AC Leak',
+          description: 'A genuine issue loaded from Supabase',
+          category: IssueCategory.water,
+          severity: IssueSeverity.high,
+          status: ReportStatus.reported,
+          location: const CampusLocation(
+            building: 'Central Library',
+            floor: 'Floor 2',
+            area: 'Study Hall West',
+          ),
+          createdAt: DateTime.now(),
+        ),
+      ];
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            greetingProvider.overrideWithValue('Good morning'),
+            myReportsProvider.overrideWith(() => _TestMyReportsNotifier(genuineReports)),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: StudentHomeScreen(
+              onNavigateToReports: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Genuine Library AC Leak'), findsOneWidget);
+      expect(find.text('REP-2026-001'), findsNothing);
+      expect(find.text('All clear nearby!'), findsNothing);
+    });
+
+    testWidgets('Pull to refresh preserves genuine data without flashing mock items', (tester) async {
+      final genuineReports = [
+        ReportModel(
+          id: 'genuine-uuid-1',
+          title: 'Genuine Library AC Leak',
+          description: 'A genuine issue loaded from Supabase',
+          category: IssueCategory.water,
+          severity: IssueSeverity.high,
+          status: ReportStatus.reported,
+          location: const CampusLocation(
+            building: 'Central Library',
+            floor: 'Floor 2',
+            area: 'Study Hall West',
+          ),
+          createdAt: DateTime.now(),
+        ),
+      ];
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            greetingProvider.overrideWithValue('Good morning'),
+            myReportsProvider.overrideWith(() => _TestMyReportsNotifier(genuineReports)),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: StudentHomeScreen(
+              onNavigateToReports: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Genuine Library AC Leak'), findsOneWidget);
+
+      // Trigger pull to refresh
+      await tester.fling(find.byType(SingleChildScrollView), const Offset(0, 300), 1000);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // During refresh, genuine data remains visible and mock items NEVER appear
+      expect(find.text('Genuine Library AC Leak'), findsOneWidget);
+      expect(find.text('Broken Solar Inverter Display'), findsNothing);
+      expect(find.text('Leaking Water Cooler Tap'), findsNothing);
+
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Genuine Library AC Leak'), findsOneWidget);
+    });
   });
 }
+
+class _TestMyReportsNotifier extends MyReportsNotifier {
+  final List<ReportModel> _initial;
+  _TestMyReportsNotifier(this._initial);
+
+  @override
+  FutureOr<List<ReportModel>> build() {
+    ref.read(reportsProvider.notifier).setReports(_initial);
+    return _initial;
+  }
+
+  @override
+  Future<void> refresh() async {
+    ref.read(reportsProvider.notifier).setReports(_initial);
+    state = AsyncData(_initial);
+  }
+}
+
+class _TestEcoPointsNotifier extends EcoPointsNotifier {
+  final EcoPointsSummary _summary;
+  _TestEcoPointsNotifier(this._summary);
+
+  @override
+  FutureOr<EcoPointsSummary> build() => _summary;
+}
+

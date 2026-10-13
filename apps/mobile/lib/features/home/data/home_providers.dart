@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../report/data/reports_provider.dart';
 import '../../report/domain/report_model.dart';
+import '../../rewards/data/eco_points_provider.dart';
+import '../../rewards/domain/eco_points_model.dart';
 
 /// Returns a time-of-day greeting based on the current hour.
 String _greetingForHour(int hour) {
@@ -16,19 +18,19 @@ final greetingProvider = Provider.autoDispose<String>((ref) {
   return _greetingForHour(DateTime.now().hour);
 });
 
-/// Summary statistics derived from the reports state.
+/// Summary statistics derived from the reports state and live get_my_eco_stats RPC.
 class HomeDashboardStats {
   final int totalReports;
   final int activeReports;
   final int resolvedReports;
   final int pendingReports;
 
-  /// Null until verified report analytics are connected.
-  final int? ecoScore;
+  /// EcoScore from live get_my_eco_stats (total points capped at 100; 0 for new account).
+  final int ecoScore;
 
-  /// Null until a trusted points ledger and approved level rules are connected.
-  final int? level;
-  final String? levelTitle;
+  /// User level derived dynamically from live get_my_eco_stats RPC.
+  final int level;
+  final String levelTitle;
 
   const HomeDashboardStats({
     required this.totalReports,
@@ -41,33 +43,35 @@ class HomeDashboardStats {
   });
 }
 
-/// Computes report counts from current session state.
-///
-/// Eco Score and level are unavailable until supported by verified backend
-/// data and approved scoring rules.
+/// Computes home dashboard statistics from current reports and dynamic live EcoScore state.
 final homeDashboardProvider = Provider<HomeDashboardStats>((ref) {
   final reports = ref.watch(reportsProvider);
+  final ecoSummary = ref.watch(ecoPointsProvider).value ?? EcoPointsSummary.zero();
 
   final total = reports.length;
-  final resolved =
-      reports.where((r) => r.status == ReportStatus.resolved).length;
-  final active = reports
-      .where((r) =>
-          r.status != ReportStatus.resolved &&
-          r.status != ReportStatus.rejected)
-      .length;
-  final pending =
-      reports.where((r) => r.status == ReportStatus.reported).length;
+  int resolved = 0;
+  int active = 0;
+  int pending = 0;
 
-  // No score or level is displayed until an approved calculation and trusted
-  // points ledger are connected to the backend.
+  for (final r in reports) {
+    if (r.status == ReportStatus.resolved) {
+      resolved++;
+    } else if (r.status != ReportStatus.rejected &&
+        r.status != ReportStatus.duplicate) {
+      active++;
+    }
+    if (r.status == ReportStatus.reported) {
+      pending++;
+    }
+  }
+
   return HomeDashboardStats(
     totalReports: total,
     activeReports: active,
     resolvedReports: resolved,
     pendingReports: pending,
-    ecoScore: null,
-    level: null,
-    levelTitle: null,
+    ecoScore: ecoSummary.ecoScore,
+    level: ecoSummary.level,
+    levelTitle: ecoSummary.levelTitle,
   );
 });

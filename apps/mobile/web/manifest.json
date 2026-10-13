@@ -1,6 +1,6 @@
 {
-    "name": "ecocampus_mobile",
-    "short_name": "ecocampus_mobile",
+    "name": "Eco Campus",
+    "short_name": "Eco Campus",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

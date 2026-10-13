@@ -9,16 +9,31 @@ import '../../report/domain/report_model.dart';
 
 class ReportDetailScreen extends ConsumerWidget {
   final String reportId;
+  final ReportModel? initialReport;
 
-  const ReportDetailScreen({super.key, required this.reportId});
+  const ReportDetailScreen({
+    super.key,
+    required this.reportId,
+    this.initialReport,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final reports = ref.watch(reportsProvider);
-    final report = reports.firstWhere(
-      (r) => r.id == reportId,
-      orElse: () => reports.first,
-    );
+    final report = ref.watch(reportsProvider.select((list) {
+          for (final r in list) {
+            if (r.id == reportId) return r;
+          }
+          return null;
+        })) ??
+        initialReport;
+
+    if (report == null) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(title: const Text('Report Not Found')),
+        body: const Center(child: Text('This report is no longer available.')),
+      );
+    }
 
     final dateStr = DateFormat('dd MMMM yyyy, h:mm a').format(report.createdAt);
 
@@ -41,12 +56,12 @@ class ReportDetailScreen extends ConsumerWidget {
         ),
         title: Text(
           report.id,
-          style: AppTextStyles.titleMedium.copyWith(fontWeight: FontWeight.w800),
+          style: AppTextStyles.titleMedium.copyWith(fontWeight: FontWeight.w800, fontSize: 16),
         ),
       ),
       body: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 36),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -106,32 +121,59 @@ class ReportDetailScreen extends ConsumerWidget {
                     'Reported: $dateStr',
                     style: AppTextStyles.bodySmall.copyWith(fontSize: 12),
                   ),
+
+                  // Optional Image Preview
+                  if (report.imageUrl != null) ...[
+                    const SizedBox(height: 16),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: Container(
+                        height: 200,
+                        width: double.infinity,
+                        color: AppColors.surfaceSubtle,
+                        child: Image.network(
+                          report.imageUrl!,
+                          fit: BoxFit.cover,
+                          cacheWidth: 800,
+                          cacheHeight: 600,
+                          errorBuilder: (_, __, ___) => const Center(
+                            child: Icon(Icons.photo_outlined, size: 40, color: AppColors.inkMuted),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+
                   const Divider(height: 24, color: AppColors.borderLight),
                   // Location details
                   _buildDetailRow(
                     icon: Icons.location_on_outlined,
-                    label: 'Location',
-                    value: '${report.location.building} · ${report.location.floor}\n${report.location.area}',
+                    label: 'Campus Location',
+                    value: report.location.formatted,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 14),
                   // Department
                   _buildDetailRow(
                     icon: Icons.business_outlined,
                     label: 'Assigned Department',
-                    value: report.department ?? 'Facilities Management',
+                    value: (report.department != null && report.department!.isNotEmpty)
+                        ? report.department!
+                        : 'Facilities Management',
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 14),
                   // Description
                   _buildDetailRow(
                     icon: Icons.notes_outlined,
                     label: 'Student Note',
-                    value: report.description,
+                    value: report.description.isNotEmpty
+                        ? report.description
+                        : 'No additional notes provided',
                   ),
                 ],
               ),
             ),
 
-            if (report.resolutionNote != null) ...[
+            if (report.resolutionNote != null && report.resolutionNote!.isNotEmpty) ...[
               const SizedBox(height: 18),
               Container(
                 width: double.infinity,
@@ -259,6 +301,77 @@ class ReportDetailScreen extends ConsumerWidget {
               }
             }),
           ),
+          if (report.statusEvents.isNotEmpty) ...[
+            const Divider(height: 28, color: AppColors.borderLight),
+            Text(
+              'Activity History',
+              style: AppTextStyles.labelMedium.copyWith(
+                fontWeight: FontWeight.w800,
+                color: AppColors.inkPrimary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            ...report.statusEvents.map((event) {
+              final isInitial = event.isInitialCreation;
+              final eventTitle = event.displayTitle;
+              final timeStr = DateFormat('dd MMM yyyy, h:mm a').format(event.occurredAt);
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      margin: const EdgeInsets.only(top: 4, right: 12),
+                      decoration: BoxDecoration(
+                        color: isInitial ? AppColors.primary : const Color(0xFF2F80ED),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                eventTitle,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.inkPrimary,
+                                ),
+                              ),
+                              Text(
+                                timeStr,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppColors.inkMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (event.note != null && event.note!.trim().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              event.note!.trim(),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.inkSecondary,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
         ],
       ),
     );
