@@ -6,6 +6,7 @@ import 'reports_repository.dart';
 
 import '../../rewards/data/achievements_provider.dart';
 import '../../rewards/data/challenges_provider.dart';
+import '../../map/data/campus_map_provider.dart';
 
 // Old UserPointsNotifier / userPointsProvider / userLevelProvider removed.
 // EcoPoints are now managed by rewards/data/eco_points_provider.dart
@@ -28,6 +29,7 @@ class ReportsNotifier extends Notifier<List<ReportModel>> {
     state = [newReport, ...state.where((r) => r.id != newReport.id)];
     ref.invalidate(achievementsProvider);
     ref.invalidate(dailyChallengesProvider);
+    ref.invalidate(buildingSummariesProvider);
   }
 
   void updateReportStatus(String id, ReportStatus newStatus, {String? resolutionNote}) {
@@ -39,6 +41,7 @@ class ReportsNotifier extends Notifier<List<ReportModel>> {
     }).toList();
     ref.invalidate(achievementsProvider);
     ref.invalidate(dailyChallengesProvider);
+    ref.invalidate(buildingSummariesProvider);
   }
 }
 
@@ -111,6 +114,7 @@ class MyReportsNotifier extends AsyncNotifier<List<ReportModel>> {
     ref.read(campusReportsProvider.notifier).addReport(report);
     ref.invalidate(achievementsProvider);
     ref.invalidate(dailyChallengesProvider);
+    ref.invalidate(buildingSummariesProvider);
   }
 
   /// Updates report status and invalidates rewards state
@@ -126,6 +130,7 @@ class MyReportsNotifier extends AsyncNotifier<List<ReportModel>> {
     ref.read(reportsProvider.notifier).setReports(updated);
     ref.invalidate(achievementsProvider);
     ref.invalidate(dailyChallengesProvider);
+    ref.invalidate(buildingSummariesProvider);
   }
 }
 

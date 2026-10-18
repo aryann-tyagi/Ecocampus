@@ -6,6 +6,8 @@ import 'package:ecocampus_mobile/features/auth/data/auth_providers.dart';
 import 'package:ecocampus_mobile/features/home/data/home_providers.dart';
 import 'package:ecocampus_mobile/features/report/data/reports_provider.dart';
 import 'package:ecocampus_mobile/features/report/data/reports_repository.dart';
+import 'package:ecocampus_mobile/features/report/domain/ai_analysis_models.dart';
+import 'package:ecocampus_mobile/features/report/domain/duplicate_detection_models.dart';
 import 'package:ecocampus_mobile/features/report/domain/report_model.dart';
 import 'package:ecocampus_mobile/features/rewards/data/eco_points_provider.dart';
 import 'package:ecocampus_mobile/features/rewards/data/eco_points_repository.dart';
@@ -96,6 +98,37 @@ class FakeMultiAccountRepository implements ReportsRepository, EcoPointsReposito
     } catch (_) {
       return null;
     }
+  }
+
+  @override
+  Future<AiIssueAnalysis> analyzeReport({
+    required Uint8List photoBytes,
+    required String photoMimeType,
+    String? userDescription,
+  }) async {
+    return const AiIssueAnalysis(
+      issueTitle: 'Test Campus Issue',
+      issueDescription: 'Observable test issue.',
+      category: IssueCategory.waste,
+      severity: IssueSeverity.medium,
+      department: 'Sanitation & Grounds',
+      confidence: 'high',
+      needsReview: false,
+      reasoningSummary: 'Test photo evidence analysis.',
+    );
+  }
+
+  @override
+  Future<DuplicateCheckResult> checkDuplicates({
+    required String buildingId,
+    required IssueCategory category,
+    required String title,
+    required String description,
+    String? floorId,
+    String? floorText,
+    String? locationDetails,
+  }) async {
+    return DuplicateCheckResult.noMatch();
   }
 
   // ─── EcoPointsRepository implementation ───────────────────────────────

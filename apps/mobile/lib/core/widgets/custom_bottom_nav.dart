@@ -5,6 +5,18 @@ class CustomBottomNavBar extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
 
+  /// Capsule height of the floating navigation pill (73dp: 57dp content + 16dp vertical padding).
+  static const double capsuleHeight = 73.0;
+
+  /// Bottom margin beneath the floating capsule (12dp).
+  static const double bottomMargin = 12.0;
+
+  /// Calculates the total vertical space occupied by the navigation bar,
+  /// including the floating capsule, bottom margin, and system safe-area insets.
+  static double totalHeight(BuildContext context) {
+    return capsuleHeight + bottomMargin + MediaQuery.paddingOf(context).bottom;
+  }
+
   const CustomBottomNavBar({
     super.key,
     required this.currentIndex,

@@ -28,9 +28,15 @@ class HomeDashboardStats {
   /// EcoScore from live get_my_eco_stats (total points capped at 100; 0 for new account).
   final int ecoScore;
 
+  /// Actual total EcoPoints from live get_my_eco_stats (uncapped).
+  final int totalPoints;
+
   /// User level derived dynamically from live get_my_eco_stats RPC.
   final int level;
   final String levelTitle;
+
+  /// Progress fraction within the current level (0.0 to 1.0).
+  final double levelProgress;
 
   const HomeDashboardStats({
     required this.totalReports,
@@ -38,8 +44,10 @@ class HomeDashboardStats {
     required this.resolvedReports,
     required this.pendingReports,
     required this.ecoScore,
+    this.totalPoints = 0,
     required this.level,
     required this.levelTitle,
+    this.levelProgress = 0.0,
   });
 }
 
@@ -71,7 +79,10 @@ final homeDashboardProvider = Provider<HomeDashboardStats>((ref) {
     resolvedReports: resolved,
     pendingReports: pending,
     ecoScore: ecoSummary.ecoScore,
+    totalPoints: ecoSummary.totalPoints,
     level: ecoSummary.level,
     levelTitle: ecoSummary.levelTitle,
+    levelProgress: ecoSummary.levelProgress,
   );
 });
+

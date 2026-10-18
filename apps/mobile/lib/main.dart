@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/config/supabase_config.dart';
+import 'core/notifications/push_notification_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/widgets/custom_bottom_nav.dart';
 import 'features/auth/presentation/auth_gate.dart';
@@ -31,6 +32,9 @@ void main() async {
     );
   }
 
+  // Initialize push notification & local notification handlers safely
+  await PushNotificationService.instance.initialize();
+
   runApp(
     ProviderScope(
       overrides: [
@@ -49,6 +53,7 @@ class EcoCampusApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: PushNotificationService.navigatorKey,
       title: 'Eco Campus',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
@@ -82,7 +87,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
               if (mounted) setState(() => _currentIndex = 3);
             },
           ),
-          const CampusMapScreen(),
+          CampusMapScreen(isActive: _currentIndex == 1),
           const MyReportsScreen(),
           RewardsScreen(isActive: _currentIndex == 3),
         ],

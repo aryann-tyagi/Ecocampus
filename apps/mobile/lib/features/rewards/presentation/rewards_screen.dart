@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/custom_bottom_nav.dart';
 import '../../../core/widgets/sprig_mascot.dart';
 import '../../auth/data/auth_providers.dart';
 import '../../profile/data/profile_providers.dart';
@@ -11,6 +12,7 @@ import '../data/achievements_provider.dart';
 import '../domain/achievement_model.dart';
 import '../data/challenges_provider.dart';
 import '../domain/daily_challenge_model.dart';
+import '../../report/presentation/report_issue_screen.dart';
 
 class RewardsScreen extends ConsumerStatefulWidget {
   final bool isActive;
@@ -67,19 +69,38 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
     final dailyChallengesAsync = ref.watch(dailyChallengesProvider);
     final currentUser = ref.watch(currentUserProvider);
 
+    final double scaffoldBottomPadding = MediaQuery.paddingOf(context).bottom;
+    final double hardwareBottomInset = MediaQuery.viewPaddingOf(context).bottom;
+
+    // When hosted inside MainNavigationShell's Scaffold(extendBody: true),
+    // Scaffold automatically includes the bottomNavigationBar height in MediaQuery.paddingOf(context).bottom.
+    // To prevent duplicating this inset, we use the Scaffold-provided bottom padding directly if available,
+    // or fallback to CustomBottomNavBar.totalHeight(context) if tested standalone without a parent Scaffold.
+    final double navBarHeight = scaffoldBottomPadding > hardwareBottomInset
+        ? scaffoldBottomPadding
+        : CustomBottomNavBar.totalHeight(context);
+
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        bottom: false,
-        child: RefreshIndicator(
-          onRefresh: _handleRefresh,
-          color: AppColors.primary,
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(
-              parent: BouncingScrollPhysics(),
-            ),
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 110),
-            child: Column(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: navBarHeight,
+            child: SafeArea(
+              bottom: false,
+              child: RefreshIndicator(
+                onRefresh: _handleRefresh,
+                color: AppColors.primary,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: BouncingScrollPhysics(),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                  child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // 1. Top Header Row
@@ -639,7 +660,10 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
           ),
         ),
       ),
-    );
+    ),
+  ],
+),
+);
   }
 
   Widget _buildLeaderboardItem({
@@ -721,6 +745,78 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Top Badges Row: Recurrence, Category, Points
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  challenge.recurrenceLabel,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: accentColor,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+              if (challenge.category != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F7EE),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    challenge.category!.toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.primary,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ),
+              ],
+              const Spacer(),
+              // CUSTOMIZABLE REWARD POINTS PILL
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF8E1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFFE082)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.eco_rounded,
+                      size: 13,
+                      color: Color(0xFFF57F17),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '+${challenge.rewardPoints} EcoPoints',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFFF57F17),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -729,8 +825,8 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
                 clipBehavior: Clip.none,
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 46,
+                    height: 46,
                     decoration: BoxDecoration(
                       color: isCompleted
                           ? const Color(0xFFD6F2E3)
@@ -741,7 +837,7 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
                       child: Icon(
                         challenge.iconData,
                         color: isCompleted ? const Color(0xFF1EA05A) : accentColor,
-                        size: 24,
+                        size: 22,
                       ),
                     ),
                   ),
@@ -832,6 +928,23 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
                         height: 1.3,
                       ),
                     ),
+                    if (challenge.buildingName != null) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on_outlined, size: 12, color: AppColors.primary),
+                          const SizedBox(width: 3),
+                          Text(
+                            'Location: ${challenge.buildingName}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -869,6 +982,42 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
               ),
             ],
           ),
+
+          if (!isCompleted) ...[
+            const SizedBox(height: 10),
+            InkWell(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (ctx) => const ReportIssueScreen()),
+                );
+              },
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7FAF8),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.borderLight),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.camera_alt_outlined, size: 14, color: AppColors.primary),
+                    SizedBox(width: 6),
+                    Text(
+                      'Report Issue to Complete',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

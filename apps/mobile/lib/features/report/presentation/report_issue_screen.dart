@@ -11,8 +11,12 @@ import '../../auth/data/auth_providers.dart';
 import '../data/campus_locations_repository.dart';
 import '../data/reports_provider.dart';
 import '../data/reports_repository.dart';
+import '../domain/ai_analysis_models.dart';
+import '../domain/duplicate_detection_models.dart';
 import '../domain/campus_location_models.dart';
 import '../domain/report_model.dart';
+import '../../reports_tracking/presentation/report_detail_screen.dart';
+import '../../map/data/campus_map_provider.dart';
 import '../../rewards/data/eco_points_provider.dart';
 import '../../rewards/data/achievements_provider.dart';
 import '../../rewards/data/challenges_provider.dart';
@@ -23,7 +27,12 @@ const int kMaxPhotoSizeBytes = 8 * 1024 * 1024; // 8 MB limit
 enum LocationCaptureStatus { getting, attached, unavailable }
 
 class ReportIssueScreen extends ConsumerStatefulWidget {
-  const ReportIssueScreen({super.key});
+  final String? initialBuildingName;
+
+  const ReportIssueScreen({
+    super.key,
+    this.initialBuildingName,
+  });
 
   @override
   ConsumerState<ReportIssueScreen> createState() => _ReportIssueScreenState();
@@ -53,19 +62,56 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
   String? _photoMimeType;
   String? _photoError;
 
+  // AI Understanding State
+  bool _isAnalyzing = false;
+  AiIssueAnalysis? _aiAnalysis;
+  String? _aiAnalysisError;
+  bool _titleEditedByUser = false;
+  bool _descEditedByUser = false;
+  bool _categoryEditedByUser = false;
+  bool _severityEditedByUser = false;
+
+  // Intelligent Duplicate Detection State
+  bool _isCheckingDuplicates = false;
+  DuplicateCheckResult? _duplicateResult;
+  bool _duplicateCheckStale = true;
+  String? _lastCheckedSignature;
+
   bool _isSubmitting = false;
 
   final ImagePicker _picker = ImagePicker();
 
+  void _invalidateDuplicateCheck() {
+    _duplicateCheckStale = true;
+    _lastCheckedSignature = null;
+    _duplicateResult = null;
+  }
+
   @override
   void initState() {
     super.initState();
-    _titleController = TextEditingController(text: 'Overflowing waste bin');
-    _descController = TextEditingController(
-      text: 'Recycling bin overflowing with food containers and cups spilling onto walkway.',
-    );
-    _locationDetailsController = TextEditingController(text: 'Near East Patio entrance');
+    _titleController = TextEditingController();
+    _descController = TextEditingController();
+    _locationDetailsController = TextEditingController();
     _manualFloorController = TextEditingController();
+
+    _titleController.addListener(() {
+      if (!_isAnalyzing) {
+        _invalidateDuplicateCheck();
+      }
+    });
+    _descController.addListener(() {
+      if (!_isAnalyzing) {
+        _invalidateDuplicateCheck();
+      }
+    });
+    _locationDetailsController.addListener(() {
+      _invalidateDuplicateCheck();
+    });
+    _manualFloorController.addListener(() {
+      _invalidateDuplicateCheck();
+    });
+
     _captureLocation();
   }
 
@@ -297,11 +343,189 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
       _photoBytes = null;
       _photoMimeType = null;
       _photoError = null;
+      _aiAnalysis = null;
+      _aiAnalysisError = null;
+      _invalidateDuplicateCheck();
     });
   }
 
+  /// Triggers AI Issue Understanding via Edge Function.
+  Future<void> _runAiAnalysis() async {
+    if (_photoBytes == null || _photoMimeType == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select or capture a photo first to analyze.'),
+          backgroundColor: AppColors.severityCritical,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isAnalyzing = true;
+      _aiAnalysisError = null;
+    });
+
+    try {
+      final repo = ref.read(reportsRepositoryProvider);
+      final analysis = await repo.analyzeReport(
+        photoBytes: _photoBytes!,
+        photoMimeType: _photoMimeType!,
+        userDescription: _descController.text.trim(),
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _isAnalyzing = false;
+        _aiAnalysis = analysis;
+        _aiAnalysisError = null;
+
+        // Populate fields if student has not manually customized them
+        if (!_titleEditedByUser || _titleController.text.trim().isEmpty) {
+          _titleController.text = analysis.issueTitle;
+          _titleEditedByUser = false;
+        }
+        if (!_descEditedByUser || _descController.text.trim().isEmpty) {
+          _descController.text = analysis.issueDescription;
+          _descEditedByUser = false;
+        }
+        if (!_categoryEditedByUser) {
+          _selectedCategory = analysis.category;
+          _categoryEditedByUser = false;
+          _invalidateDuplicateCheck();
+        }
+        if (!_severityEditedByUser) {
+          _selectedSeverity = analysis.severity;
+          _severityEditedByUser = false;
+        }
+
+        _invalidateDuplicateCheck();
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  analysis.needsReview
+                      ? 'AI suggestions generated (Review recommended)'
+                      : 'AI suggestions applied (${analysis.confidence.toUpperCase()} confidence)',
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final errorMessage = e is AiAnalysisException ? e.message : 'AI analysis is temporarily unavailable: $e';
+      setState(() {
+        _isAnalyzing = false;
+        _aiAnalysis = null;
+        _aiAnalysisError = errorMessage;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: const Color(0xFFD97706),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  /// Manually checks for similar active reports before final submission.
+  Future<void> _runManualDuplicateCheck() async {
+    if (_isCheckingDuplicates) return;
+
+    if (_selectedBuilding == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a campus building first to check for duplicates.'),
+          backgroundColor: AppColors.severityCritical,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final isManual = _isManualFloorBuilding(_selectedBuilding);
+    setState(() => _isCheckingDuplicates = true);
+
+    final signature = '${_selectedBuilding?.id}_${_selectedCategory.name}_${_titleController.text.trim().toLowerCase()}_${_descController.text.trim().toLowerCase()}_${_selectedFloor?.id}_${_manualFloorController.text.trim().toLowerCase()}_${_locationDetailsController.text.trim().toLowerCase()}';
+
+    try {
+      final repo = ref.read(reportsRepositoryProvider);
+      final result = await repo.checkDuplicates(
+        buildingId: _selectedBuilding!.id,
+        category: _selectedCategory,
+        title: _titleController.text.trim(),
+        description: _descController.text.trim(),
+        floorId: !isManual ? _selectedFloor?.id : null,
+        floorText: isManual ? _manualFloorController.text.trim() : null,
+        locationDetails: _locationDetailsController.text.trim().isNotEmpty
+            ? _locationDetailsController.text.trim()
+            : null,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _isCheckingDuplicates = false;
+        _duplicateResult = result;
+        _lastCheckedSignature = signature;
+        _duplicateCheckStale = false;
+      });
+
+      if (result.hasMatch) {
+        _showDuplicateWarningModal(result);
+      } else if (result.outcome == DuplicateOutcome.noMatch) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_outline_rounded, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Text('No similar active report found in ${_selectedBuilding!.name}.'),
+              ],
+            ),
+            backgroundColor: AppColors.primary,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Duplicate check is temporarily unavailable.'),
+            backgroundColor: Color(0xFFD97706),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isCheckingDuplicates = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Duplicate check error: $e'),
+          backgroundColor: AppColors.severityCritical,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  /// Primary submission handler: validates form, executes duplicate check, and shows warning if matched.
   void _submitReport() async {
-    if (_isSubmitting) return;
+    if (_isSubmitting || _isCheckingDuplicates) return;
 
     // Validate photo
     if (_photoBytes == null || _photoMimeType == null) {
@@ -354,6 +578,22 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
       return;
     }
 
+    // Validate location details adheres to database constraints (2 - 255 chars)
+    final locationValidation = LocationDetailsValidator.validate(
+      _locationDetailsController.text,
+      isRequired: true,
+    );
+    if (locationValidation != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(locationValidation),
+          backgroundColor: AppColors.severityCritical,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     final user = ref.read(currentUserProvider);
     if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -366,8 +606,84 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
       return;
     }
 
+    // Pre-submission duplicate check
+    final signature = '${_selectedBuilding?.id}_${_selectedCategory.name}_${_titleController.text.trim().toLowerCase()}_${_descController.text.trim().toLowerCase()}_${_selectedFloor?.id}_${_manualFloorController.text.trim().toLowerCase()}_${_locationDetailsController.text.trim().toLowerCase()}';
+
+    if (_duplicateCheckStale || _lastCheckedSignature != signature) {
+      setState(() => _isCheckingDuplicates = true);
+
+      try {
+        final repo = ref.read(reportsRepositoryProvider);
+        final dupResult = await repo.checkDuplicates(
+          buildingId: _selectedBuilding!.id,
+          category: _selectedCategory,
+          title: _titleController.text.trim(),
+          description: _descController.text.trim(),
+          floorId: !isManual ? _selectedFloor?.id : null,
+          floorText: isManual ? _manualFloorController.text.trim() : null,
+          locationDetails: _locationDetailsController.text.trim().isNotEmpty
+              ? _locationDetailsController.text.trim()
+              : null,
+        );
+
+        if (!mounted) return;
+        setState(() {
+          _isCheckingDuplicates = false;
+          _duplicateResult = dupResult;
+          _lastCheckedSignature = signature;
+          _duplicateCheckStale = false;
+        });
+
+        if (dupResult.hasMatch) {
+          _showDuplicateWarningModal(dupResult);
+          return;
+        } else if (dupResult.outcome == DuplicateOutcome.checkUnavailable) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Duplicate check is temporarily unavailable. Proceeding with report submission.'),
+              backgroundColor: Color(0xFFD97706),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint('Pre-submission duplicate check failed: $e');
+        if (!mounted) return;
+        setState(() => _isCheckingDuplicates = false);
+      }
+    } else if (_duplicateResult != null && _duplicateResult!.hasMatch) {
+      _showDuplicateWarningModal(_duplicateResult!);
+      return;
+    }
+
+    _executeSubmission();
+  }
+
+  /// Executes database record insertion, photo upload, and gamification refresh.
+  void _executeSubmission() async {
+    if (_isSubmitting) return;
+
+    if (_photoBytes == null || _photoMimeType == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please take or upload a photo of the issue.'),
+          backgroundColor: AppColors.severityCritical,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final user = ref.read(currentUserProvider);
+    if (user == null) return;
+
+    // Synchronously mark submitting to prevent rapid multi-tap race conditions
+    setState(() => _isSubmitting = true);
+
+    final isManual = _isManualFloorBuilding(_selectedBuilding);
     final draftId = const Uuid().v4();
-    final suggestedDept = _getSuggestedDepartmentLabel(_selectedCategory);
+    final suggestedDept = _aiAnalysis?.department ?? _getSuggestedDepartmentLabel(_selectedCategory);
 
     final draft = ReportSubmissionDraft(
       draftId: draftId,
@@ -388,8 +704,6 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
       photoFileName: _pickedFile?.name ?? 'photo.jpg',
     );
 
-    setState(() => _isSubmitting = true);
-
     try {
       final repo = ref.read(reportsRepositoryProvider);
       final createdReport = await repo.submitReport(draft: draft, userId: user.id);
@@ -403,6 +717,7 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
       ref.invalidate(leaderboardProvider);
       ref.invalidate(achievementsProvider);
       ref.invalidate(dailyChallengesProvider);
+      ref.invalidate(buildingSummariesProvider);
 
       if (!mounted) return;
       setState(() => _isSubmitting = false);
@@ -412,10 +727,19 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
       if (!mounted) return;
       setState(() => _isSubmitting = false);
 
-      final errorMsg = e.toString().contains('permission denied') ||
-              e.toString().contains('42501')
-          ? 'Database permission error: INSERT privilege missing on public.reports in Supabase.'
-          : 'Failed to submit report: $e';
+      final String errorMsg;
+      if (e is ReportSubmissionException) {
+        errorMsg = e.message;
+      } else if (e.toString().contains('permission denied') ||
+          e.toString().contains('42501')) {
+        errorMsg = 'Database permission error: INSERT privilege missing on public.reports in Supabase.';
+      } else if (e.toString().contains('23514') ||
+          e.toString().contains('location_details') ||
+          e.toString().contains('location_detials')) {
+        errorMsg = 'Location details must be between 2 and 255 characters.';
+      } else {
+        errorMsg = 'Failed to submit report. Please try again.';
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -427,6 +751,306 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
       );
     }
   }
+
+  /// Displays the Duplicate Warning bottom sheet when a similar active issue is found.
+  void _showDuplicateWarningModal(DuplicateCheckResult result) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (modalCtx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF3C7),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.warning_amber_rounded,
+                        color: Color(0xFFD97706),
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'This issue may already be reported',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.inkPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            result.outcome == DuplicateOutcome.likelyDuplicate
+                                ? 'Likely duplicate issue detected'
+                                : 'Possible matching report found',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFD97706),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'We found an existing report that looks similar. Review it before submitting a new one.',
+                  style: AppTextStyles.bodySmall.copyWith(color: AppColors.inkSecondary),
+                ),
+                const SizedBox(height: 16),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.38,
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: result.candidates.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (ctx, i) {
+                      final candidate = result.candidates[i];
+                      return _buildCandidateCard(candidate, modalCtx);
+                    },
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(modalCtx).pop(),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          side: const BorderSide(color: AppColors.borderLight),
+                        ),
+                        child: const Text(
+                          'Edit My Report',
+                          style: TextStyle(color: AppColors.inkPrimary, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(modalCtx).pop();
+                          _executeSubmission();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        ),
+                        child: const Text(
+                          'Report Anyway',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCandidateCard(DuplicateCandidate candidate, BuildContext modalCtx) {
+    Color statusBg;
+    Color statusText;
+    switch (candidate.status) {
+      case ReportStatus.reported:
+        statusBg = const Color(0xFFFEF3C7);
+        statusText = const Color(0xFFB45309);
+        break;
+      case ReportStatus.assigned:
+        statusBg = const Color(0xFFE0E7FF);
+        statusText = const Color(0xFF4338CA);
+        break;
+      case ReportStatus.inProgress:
+        statusBg = const Color(0xFFDBEAFE);
+        statusText = const Color(0xFF1D4ED8);
+        break;
+      default:
+        statusBg = const Color(0xFFF1F5F9);
+        statusText = AppColors.inkSecondary;
+    }
+
+    final String floorInfo = candidate.floorName != null && candidate.floorName!.isNotEmpty
+        ? ' · ${candidate.floorName}'
+        : '';
+    final String areaInfo = candidate.areaName != null && candidate.areaName!.isNotEmpty
+        ? ' (${candidate.areaName})'
+        : '';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  candidate.title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.inkPrimary,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: statusBg,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  candidate.status.displayName,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: statusText,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  candidate.category.displayName,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${candidate.buildingName}$floorInfo$areaInfo',
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: AppColors.inkSecondary,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Reported ${_formatRelativeTime(candidate.reportedAt)}',
+                style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(modalCtx).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ReportDetailScreen(
+                        reportId: candidate.reportId,
+                        initialReport: candidate.toReportModel(),
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.open_in_new_rounded, size: 12, color: Colors.white),
+                label: const Text(
+                  'View Existing Report',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  elevation: 0,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+
+
+  String _formatRelativeTime(DateTime dateTime) {
+    final diff = DateTime.now().difference(dateTime);
+    if (diff.inMinutes < 60) {
+      return '${diff.inMinutes}m ago';
+    } else if (diff.inHours < 24) {
+      return '${diff.inHours}h ago';
+    } else if (diff.inDays < 7) {
+      return '${diff.inDays}d ago';
+    } else {
+      return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
+    }
+  }
+
 
   String _getSuggestedDepartmentLabel(IssueCategory category) {
     switch (category) {
@@ -704,6 +1328,7 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                       const SizedBox(height: 6),
                       TextFormField(
                         controller: _locationDetailsController,
+                        maxLength: 255,
                         decoration: InputDecoration(
                           hintText: 'e.g. Room 204, East Entrance, Corridor',
                           filled: true,
@@ -712,6 +1337,7 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                             borderRadius: BorderRadius.circular(16),
                           ),
                         ),
+                        validator: (val) => LocationDetailsValidator.validate(val, isRequired: true),
                       ),
                       const SizedBox(height: 16),
                       // 4. Automatic GPS Location Indicator
@@ -723,9 +1349,24 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                         height: 50,
                         child: ElevatedButton(
                           onPressed: () {
+                            final locError = LocationDetailsValidator.validate(
+                              _locationDetailsController.text,
+                              isRequired: true,
+                            );
+                            if (locError != null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(locError),
+                                  backgroundColor: AppColors.severityCritical,
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                              return;
+                            }
                             setState(() {
                               _selectedBuilding = tempBuilding;
                               _selectedFloor = tempFloor;
+                              _invalidateDuplicateCheck();
                             });
                             Navigator.of(sheetCtx).pop();
                           },
@@ -769,9 +1410,6 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
         : (_selectedFloor?.label ?? 'Ground Floor');
 
     final String displayBuildingText = _selectedBuilding?.name ?? 'Select Building';
-    final String displayDetailsText = _locationDetailsController.text.isNotEmpty
-        ? _locationDetailsController.text
-        : 'Exact room / area';
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -829,12 +1467,54 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                 ),
               ],
 
+              if (_aiAnalysisError != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFFDE68A)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline_rounded, color: Color(0xFFD97706), size: 18),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _aiAnalysisError!,
+                          style: const TextStyle(fontSize: 12, color: Color(0xFF92400E)),
+                        ),
+                      ),
+                      InkWell(
+                        onTap: _runAiAnalysis,
+                        borderRadius: BorderRadius.circular(8),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          child: Text(
+                            'Retry',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFFB45309),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
               const SizedBox(height: 16),
 
               // 2. Mascot Status Row
               _buildMascotStatusRow(),
 
               const SizedBox(height: 16),
+
+              // 2.5 AI Suggestions Card
+              _buildAiSuggestionsCard(),
 
               // 3. Form Card
               Container(
@@ -865,6 +1545,12 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                     TextFormField(
                       controller: _titleController,
                       style: AppTextStyles.labelLarge.copyWith(fontWeight: FontWeight.w700),
+                      onChanged: (val) {
+                        setState(() {
+                          _titleEditedByUser = true;
+                          _duplicateCheckStale = true;
+                        });
+                      },
                       decoration: InputDecoration(
                         hintText: 'e.g. Broken water pipe, overflowing bin',
                         filled: true,
@@ -948,8 +1634,25 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                     ),
                     const SizedBox(height: 8),
                     buildingsAsync.when(
-                      data: (buildings) => InkWell(
-                        onTap: () => _showLocationPickerModal(buildings),
+                      data: (buildings) {
+                        if (_selectedBuilding == null &&
+                            widget.initialBuildingName != null &&
+                            buildings.isNotEmpty) {
+                          final match = buildings.where((b) {
+                            final target = widget.initialBuildingName!.toLowerCase().trim();
+                            final bName = b.name.toLowerCase().trim();
+                            return bName == target || bName.contains(target) || target.contains(bName);
+                          }).firstOrNull;
+                          if (match != null) {
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (mounted && _selectedBuilding == null) {
+                                setState(() => _selectedBuilding = match);
+                              }
+                            });
+                          }
+                        }
+                        return InkWell(
+                          onTap: () => _showLocationPickerModal(buildings),
                         borderRadius: BorderRadius.circular(18),
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -983,7 +1686,9 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      displayDetailsText,
+                                      _locationDetailsController.text.trim().isNotEmpty
+                                          ? _locationDetailsController.text.trim()
+                                          : 'Tap to change building or floor',
                                       style: AppTextStyles.bodySmall.copyWith(color: AppColors.inkSecondary),
                                     ),
                                   ],
@@ -993,7 +1698,8 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                             ],
                           ),
                         ),
-                      ),
+                      );
+                    },
                       loading: () => const Center(
                         child: Padding(
                           padding: EdgeInsets.all(12),
@@ -1004,6 +1710,40 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                         'Failed to load buildings: $err',
                         style: const TextStyle(color: AppColors.severityCritical, fontSize: 13),
                       ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Specific Location Details',
+                      style: AppTextStyles.bodySmall.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.inkSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextFormField(
+                      controller: _locationDetailsController,
+                      maxLength: 255,
+                      style: AppTextStyles.bodyMedium,
+                      onChanged: (val) {
+                        setState(() {
+                          _invalidateDuplicateCheck();
+                        });
+                      },
+                      decoration: InputDecoration(
+                        hintText: 'e.g. Room 204, East Entrance, West Corridor',
+                        filled: true,
+                        fillColor: AppColors.surfaceSubtle,
+                        prefixIcon: const Icon(Icons.meeting_room_outlined, size: 20, color: AppColors.inkSecondary),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: const BorderSide(color: AppColors.borderLight),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: const BorderSide(color: AppColors.borderLight),
+                        ),
+                      ),
+                      validator: (val) => LocationDetailsValidator.validate(val, isRequired: true),
                     ),
                     _buildLocationStatusBadge(),
                     const SizedBox(height: 18),
@@ -1021,6 +1761,12 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                       controller: _descController,
                       maxLines: 3,
                       style: AppTextStyles.bodyMedium,
+                      onChanged: (val) {
+                        setState(() {
+                          _descEditedByUser = true;
+                          _duplicateCheckStale = true;
+                        });
+                      },
                       decoration: InputDecoration(
                         hintText: 'Describe what happened and any safety or hazard details...',
                         filled: true,
@@ -1043,9 +1789,41 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
                 ),
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
 
-              // Submit Button with "+30 EcoPoints" badge
+              // 4. Duplicate Check Result Card
+              _buildDuplicateStatusCard(),
+
+              // 5. Pre-submission "Check for duplicates" manual action
+              OutlinedButton.icon(
+                onPressed: (_isCheckingDuplicates || _isSubmitting)
+                    ? null
+                    : _runManualDuplicateCheck,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 48),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                  side: BorderSide(
+                    color: _duplicateResult != null && !_duplicateCheckStale
+                        ? AppColors.primary
+                        : AppColors.borderLight,
+                  ),
+                ),
+                icon: const Icon(Icons.search_rounded, size: 18, color: AppColors.primary),
+                label: Text(
+                  _duplicateResult != null && !_duplicateCheckStale
+                      ? 'Re-check duplicates'
+                      : 'Check for similar active issues',
+                  style: const TextStyle(
+                    color: AppColors.inkPrimary,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // 6. Submit Button with "+30 EcoPoints" badge
               SizedBox(
                 width: double.infinity,
                 height: 56,
@@ -1288,6 +2066,63 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
 
             // Retake / Replace / Remove controls (when photo exists)
             if (hasPhoto) ...[
+              // Left: Analyze with AI button
+              Positioned(
+                bottom: 16,
+                left: 16,
+                child: InkWell(
+                  onTap: _isAnalyzing ? null : _runAiAnalysis,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: _aiAnalysis != null ? const Color(0xFF144D37) : AppColors.primary,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.25),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_isAnalyzing) ...[
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Analyzing...',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ] else ...[
+                          const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 16),
+                          const SizedBox(width: 6),
+                          Text(
+                            _aiAnalysis != null ? 'Re-analyze' : 'Analyze with AI',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              // Right: Retake & Clear buttons
               Positioned(
                 bottom: 16,
                 right: 16,
@@ -1354,6 +2189,22 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
   }
 
   Widget _buildMascotStatusRow() {
+    String title;
+    String subtitle;
+    if (_isAnalyzing) {
+      title = 'AI is analyzing your photo...';
+      subtitle = 'Detecting issue category, severity & campus department';
+    } else if (_aiAnalysis != null) {
+      title = _aiAnalysis!.needsReview ? 'AI suggestions need review' : 'AI suggestions ready!';
+      subtitle = 'Editable suggestions added below. Review and adjust anytime.';
+    } else if (_photoBytes != null) {
+      title = 'Photo attached & ready';
+      subtitle = 'Tap "Analyze with AI" for automatic issue understanding';
+    } else {
+      title = 'Manual reporting active';
+      subtitle = 'Snap a photo to enable AI analysis and duplicate detection';
+    }
+
     return Row(
       children: [
         Container(
@@ -1363,8 +2214,8 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
             color: Color(0xFFD6F2E3),
             shape: BoxShape.circle,
           ),
-          child: const Center(
-            child: SprigMascot(size: 32, animated: false),
+          child: Center(
+            child: SprigMascot(size: 32, animated: _isAnalyzing),
           ),
         ),
         const SizedBox(width: 10),
@@ -1373,11 +2224,11 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Manual reporting active',
+                title,
                 style: AppTextStyles.labelLarge.copyWith(fontWeight: FontWeight.w800, fontSize: 14),
               ),
               Text(
-                'Review and verify campus location before submission',
+                subtitle,
                 style: AppTextStyles.bodySmall.copyWith(fontSize: 12),
               ),
             ],
@@ -1387,23 +2238,457 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
     );
   }
 
+  Widget _buildAiSuggestionsCard() {
+    if (_isAnalyzing) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF0FDF4),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFBBF7D0)),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: AppColors.primary,
+              ),
+            ),
+            SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'AI Issue Understanding in progress...',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Analyzing photo for category, severity, and responsible department',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.inkSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_aiAnalysis == null) return const SizedBox.shrink();
+
+    final analysis = _aiAnalysis!;
+    Color confBg;
+    Color confText;
+    String confLabel;
+
+    if (analysis.needsReview) {
+      confBg = const Color(0xFFFEF3C7);
+      confText = const Color(0xFFB45309);
+      confLabel = 'Review Recommended';
+    } else {
+      switch (analysis.confidence) {
+        case 'high':
+          confBg = const Color(0xFFDCFCE7);
+          confText = const Color(0xFF15803D);
+          confLabel = 'High Confidence';
+          break;
+        case 'low':
+          confBg = const Color(0xFFFEE2E2);
+          confText = const Color(0xFFB91C1C);
+          confLabel = 'Low Confidence';
+          break;
+        default:
+          confBg = const Color(0xFFE0E7FF);
+          confText = const Color(0xFF4338CA);
+          confLabel = 'Medium Confidence';
+      }
+    }
+
+    final hasUserEdits = _titleEditedByUser || _descEditedByUser || _categoryEditedByUser || _severityEditedByUser;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFD1FAE5), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF144D37).withValues(alpha: 0.05),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD6F2E3),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.auto_awesome_rounded,
+                  color: AppColors.primary,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'AI Suggestions',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.inkPrimary,
+                      ),
+                    ),
+                    if (analysis.department != null)
+                      Text(
+                        'Assigned to: ${analysis.department}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: confBg,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  confLabel,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: confText,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (analysis.reasoningSummary.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.lightbulb_outline_rounded, size: 16, color: Color(0xFFD97706)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      analysis.reasoningSummary,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.inkSecondary,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildAiSuggestionTag(
+                label: 'Title: ${analysis.issueTitle}',
+                isOverridden: _titleEditedByUser && _titleController.text.trim() != analysis.issueTitle,
+              ),
+              _buildAiSuggestionTag(
+                label: 'Cat: ${analysis.category.displayName}',
+                isOverridden: _categoryEditedByUser && _selectedCategory != analysis.category,
+              ),
+              _buildAiSuggestionTag(
+                label: 'Sev: ${analysis.severity.displayName}',
+                isOverridden: _severityEditedByUser && _selectedSeverity != analysis.severity,
+              ),
+              if (analysis.department != null)
+                _buildAiSuggestionTag(
+                  label: 'Dept: ${analysis.department}',
+                  isOverridden: false,
+                ),
+            ],
+          ),
+          if (hasUserEdits) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _titleController.text = analysis.issueTitle;
+                    _descController.text = analysis.issueDescription;
+                    _selectedCategory = analysis.category;
+                    _selectedSeverity = analysis.severity;
+                    _titleEditedByUser = false;
+                    _descEditedByUser = false;
+                    _categoryEditedByUser = false;
+                    _severityEditedByUser = false;
+                    _invalidateDuplicateCheck();
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Re-applied original AI suggestions to form.'),
+                      backgroundColor: AppColors.primary,
+                      duration: Duration(seconds: 2),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.restore_rounded, size: 16, color: AppColors.primary),
+                label: const Text(
+                  'Restore AI suggestions',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiSuggestionTag({required String label, required bool isOverridden}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: isOverridden ? const Color(0xFFF1F5F9) : const Color(0xFFEAF5EE),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isOverridden ? const Color(0xFFCBD5E1) : const Color(0xFFA7E0BD),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            isOverridden ? Icons.edit_note_rounded : Icons.check_circle_outline_rounded,
+            size: 13,
+            color: isOverridden ? AppColors.inkSecondary : const Color(0xFF15803D),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: isOverridden ? AppColors.inkSecondary : const Color(0xFF144D37),
+              decoration: isOverridden ? TextDecoration.lineThrough : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDuplicateStatusCard() {
+    if (_isCheckingDuplicates) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Checking for similar active issues on campus...',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_duplicateResult == null || _duplicateCheckStale) {
+      return const SizedBox.shrink();
+    }
+
+    final res = _duplicateResult!;
+    if (res.hasMatch) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF3C7),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFFDE68A)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    res.outcome == DuplicateOutcome.likelyDuplicate
+                        ? 'Likely duplicate issue found (${res.candidates.length})'
+                        : 'Possible match found (${res.candidates.length})',
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF92400E)),
+                  ),
+                  Text(
+                    res.explanation,
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF78350F)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: () => _showDuplicateWarningModal(res),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                'Review',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFFB45309)),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (res.outcome == DuplicateOutcome.noMatch) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF0FDF4),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFBBF7D0)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF16A34A), size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'No similar active report was found in ${_selectedBuilding?.name ?? "this building"}. Ready to submit.',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF166534)),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (res.outcome == DuplicateOutcome.checkUnavailable) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFFBEB),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFFDE68A)),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.info_outline_rounded, color: Color(0xFFD97706), size: 18),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Duplicate checking temporarily unavailable. You can proceed with submission.',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF92400E)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+
   Widget _buildCategoryChip(IssueCategory cat) {
     final bool isSelected = _selectedCategory == cat;
+    final bool isAiSuggested = _aiAnalysis != null && _aiAnalysis!.category == cat;
     return GestureDetector(
-      onTap: () => setState(() => _selectedCategory = cat),
+      onTap: () => setState(() {
+        _selectedCategory = cat;
+        _categoryEditedByUser = true;
+        _invalidateDuplicateCheck();
+      }),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
           color: isSelected ? AppColors.primary : AppColors.surfaceSubtle,
           borderRadius: BorderRadius.circular(20),
+          border: isAiSuggested && !isSelected
+              ? Border.all(color: AppColors.primary, width: 1.5)
+              : null,
         ),
-        child: Text(
-          cat.displayName,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-            color: isSelected ? Colors.white : AppColors.inkPrimary,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isAiSuggested) ...[
+              Icon(
+                Icons.auto_awesome_rounded,
+                size: 13,
+                color: isSelected ? Colors.white : AppColors.primary,
+              ),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              cat.displayName,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                color: isSelected ? Colors.white : AppColors.inkPrimary,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1411,14 +2696,22 @@ class _ReportIssueScreenState extends ConsumerState<ReportIssueScreen> {
 
   Widget _buildSeverityOption(IssueSeverity severity, Color dotColor) {
     final bool isSelected = _selectedSeverity == severity;
+    final bool isAiSuggested = _aiAnalysis != null && _aiAnalysis!.severity == severity;
     return GestureDetector(
-      onTap: () => setState(() => _selectedSeverity = severity),
+      onTap: () => setState(() {
+        _selectedSeverity = severity;
+        _severityEditedByUser = true;
+        _duplicateCheckStale = true;
+      }),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
           color: isSelected ? Colors.white : Colors.transparent,
           borderRadius: BorderRadius.circular(16),
+          border: isAiSuggested && !isSelected
+              ? Border.all(color: AppColors.primary.withValues(alpha: 0.6), width: 1.2)
+              : null,
           boxShadow: isSelected
               ? [
                   BoxShadow(

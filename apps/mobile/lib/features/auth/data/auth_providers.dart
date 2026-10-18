@@ -11,6 +11,7 @@ import '../../rewards/data/achievements_repository.dart';
 import '../../rewards/data/achievements_provider.dart';
 import '../../rewards/data/challenges_repository.dart';
 import '../../rewards/data/challenges_provider.dart';
+import '../../../core/notifications/push_notification_service.dart';
 
 /// Stream of auth changes emitted by Supabase.
 final authStateChangesProvider = StreamProvider<AuthState>((ref) {
@@ -152,6 +153,11 @@ class AuthController extends Notifier<void> {
   /// Signs the user out of their session and clears all user-scoped state.
   Future<void> signOut() async {
     try {
+      // Disassociate FCM device token from this user before clearing session
+      try {
+        await PushNotificationService.instance.unregisterCurrentDeviceToken();
+      } catch (_) {}
+
       final repo = ref.read(authRepositoryProvider);
       await repo.signOut().timeout(const Duration(seconds: 10));
     } catch (_) {

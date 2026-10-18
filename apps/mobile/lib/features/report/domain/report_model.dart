@@ -168,6 +168,48 @@ class CampusLocation {
   }
 }
 
+/// Client-side validator for report location details adhering to database check constraint
+/// `reports_location_details_length_check` (or `report_location_detials_length_check`):
+/// CHECK (char_length(btrim(location_details)) BETWEEN 2 AND 255).
+class LocationDetailsValidator {
+  static const int minLength = 2;
+  static const int maxLength = 255;
+
+  /// Validates [value] against the database constraint.
+  ///
+  /// If [isRequired] is true (default in the reports schema), [value] must not be null,
+  /// empty, or whitespace-only, and its trimmed length must be between 2 and 255 characters.
+  /// If [isRequired] is false and [value] is null/empty/whitespace-only, returns null.
+  static String? validate(String? value, {bool isRequired = true}) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      if (isRequired) {
+        return 'Please enter specific location details (at least $minLength characters, e.g. Room 204).';
+      }
+      return null;
+    }
+    if (trimmed.length < minLength) {
+      return 'Location details must be at least $minLength characters.';
+    }
+    if (trimmed.length > maxLength) {
+      return 'Location details cannot exceed $maxLength characters (currently ${trimmed.length} characters).';
+    }
+    return null;
+  }
+}
+
+/// Exception thrown when submitting an issue report fails.
+class ReportSubmissionException implements Exception {
+  final String message;
+  final String? code;
+  final String? field;
+
+  const ReportSubmissionException(this.message, {this.code, this.field});
+
+  @override
+  String toString() => message;
+}
+
 class ReportMediaModel {
   final String id;
   final String reportId;
@@ -281,6 +323,8 @@ class ReportModel {
   final String description;
   final String? department;
   final String? departmentId;
+  final String? assignedDepartment;
+  final String? assignedDepartmentId;
   final String? imageUrl;
   final List<ReportMediaModel> media;
   final List<ReportStatusEventModel> statusEvents;
@@ -303,6 +347,8 @@ class ReportModel {
     required this.description,
     this.department,
     this.departmentId,
+    this.assignedDepartment,
+    this.assignedDepartmentId,
     this.imageUrl,
     this.media = const [],
     this.statusEvents = const [],
@@ -394,18 +440,35 @@ class ReportModel {
       }
     }
 
-    // 6. Department details (prioritize suggested_department_label when available)
-    final dynamic rawDept = json['departments'];
-    final Map<String, dynamic>? deptMap = rawDept is Map
-        ? rawDept.cast<String, dynamic>()
-        : (rawDept is List && rawDept.isNotEmpty && rawDept.first is Map
-            ? (rawDept.first as Map).cast<String, dynamic>()
+    // 6. Department details (prioritize assigned department if set, then suggested department / label)
+    final dynamic rawAssignedDept = json['assigned_department'];
+    final Map<String, dynamic>? assignedDeptMap = rawAssignedDept is Map
+        ? rawAssignedDept.cast<String, dynamic>()
+        : (rawAssignedDept is List && rawAssignedDept.isNotEmpty && rawAssignedDept.first is Map
+            ? (rawAssignedDept.first as Map).cast<String, dynamic>()
             : null);
-    final deptName = (deptMap?['name'] as String?)?.trim();
+    final assignedDeptName = (assignedDeptMap?['name'] as String?)?.trim();
+    final assignedDeptId = (json['assigned_department_id'] as String?) ??
+        (assignedDeptMap?['id'] as String?);
+
+    final dynamic rawSuggestedDept = json['suggested_department'] ?? json['departments'];
+    final Map<String, dynamic>? suggestedDeptMap = rawSuggestedDept is Map
+        ? rawSuggestedDept.cast<String, dynamic>()
+        : (rawSuggestedDept is List && rawSuggestedDept.isNotEmpty && rawSuggestedDept.first is Map
+            ? (rawSuggestedDept.first as Map).cast<String, dynamic>()
+            : null);
+    final suggestedDeptName = (suggestedDeptMap?['name'] as String?)?.trim();
     final suggestedDeptLabel = (json['suggested_department_label'] as String?)?.trim();
-    final departmentDisplay = (suggestedDeptLabel != null && suggestedDeptLabel.isNotEmpty)
-        ? suggestedDeptLabel
-        : deptName;
+
+    final departmentDisplay = (assignedDeptName != null && assignedDeptName.isNotEmpty)
+        ? assignedDeptName
+        : ((suggestedDeptLabel != null && suggestedDeptLabel.isNotEmpty)
+            ? suggestedDeptLabel
+            : suggestedDeptName);
+
+    final resolvedDeptId = assignedDeptId ??
+        (json['suggested_department_id'] as String?) ??
+        (suggestedDeptMap?['id'] as String?);
 
     double? parseDouble(dynamic v) {
       if (v == null) return null;
@@ -414,10 +477,18 @@ class ReportModel {
       return null;
     }
 
+    final rawTitle = ((json['issue_label'] ?? json['title']) as String?)?.trim();
+    final rawDesc = (json['description'] as String?)?.trim() ?? '';
+    final resolvedTitle = (rawTitle != null && rawTitle.isNotEmpty && rawTitle.toLowerCase() != 'unnamed')
+        ? rawTitle
+        : (rawDesc.isNotEmpty
+            ? (rawDesc.length > 50 ? '${rawDesc.substring(0, 47)}...' : rawDesc)
+            : 'Campus Issue');
+
     return ReportModel(
       id: reportId,
       reporterId: json['reporter_id'] as String?,
-      title: (json['issue_label'] as String?)?.trim() ?? 'Campus Issue',
+      title: resolvedTitle,
       category: IssueCategory.fromDbValue(json['category'] as String?),
       severity: IssueSeverity.fromDbValue(json['severity'] as String?),
       location: CampusLocation(
@@ -436,7 +507,9 @@ class ReportModel {
           : DateTime.now(),
       description: (json['description'] as String?)?.trim() ?? '',
       department: departmentDisplay,
-      departmentId: json['suggested_department_id'] as String?,
+      departmentId: resolvedDeptId,
+      assignedDepartment: assignedDeptName,
+      assignedDepartmentId: assignedDeptId,
       imageUrl: primarySignedUrl ?? (mediaList.isNotEmpty ? mediaList.first.signedUrl : null),
       media: mediaList,
       statusEvents: statusEvents,
@@ -523,6 +596,8 @@ class ReportModel {
     String? description,
     String? department,
     String? departmentId,
+    String? assignedDepartment,
+    String? assignedDepartmentId,
     String? imageUrl,
     List<ReportMediaModel>? media,
     List<ReportStatusEventModel>? statusEvents,
@@ -545,6 +620,8 @@ class ReportModel {
       description: description ?? this.description,
       department: department ?? this.department,
       departmentId: departmentId ?? this.departmentId,
+      assignedDepartment: assignedDepartment ?? this.assignedDepartment,
+      assignedDepartmentId: assignedDepartmentId ?? this.assignedDepartmentId,
       imageUrl: imageUrl ?? this.imageUrl,
       media: media ?? this.media,
       statusEvents: statusEvents ?? this.statusEvents,

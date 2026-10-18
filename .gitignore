@@ -30,3 +30,8 @@ build/
 *.keystore
 *.jks
 
+# Supabase CLI & Backups
+.temp/
+**/.temp/
+**/migrations_backup_*/
+

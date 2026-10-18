@@ -4,9 +4,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/network/supabase_client_provider.dart';
 import '../domain/daily_challenge_model.dart';
 
-/// Contract for fetching student daily challenges.
+/// Contract for fetching student challenges.
 abstract class ChallengesRepository {
-  /// Fetches daily challenges for [userId] (or the current authenticated user).
+  /// Fetches customizable and daily challenges for [userId] (or the current authenticated user).
   Future<List<DailyChallenge>> getDailyChallenges({String? userId});
 
   /// Flushes in-memory caches upon account switch or sign out.
@@ -35,9 +35,20 @@ class SupabaseChallengesRepository implements ChallengesRepository {
     }
 
     try {
-      final response = await client.rpc('get_my_daily_challenges');
-      if (response is List) {
+      // Primary: Call get_student_challenges to retrieve all active customizable challenges
+      final response = await client.rpc('get_student_challenges');
+      if (response is List && response.isNotEmpty) {
         final list = response
+            .map((item) => DailyChallenge.fromJson(Map<String, dynamic>.from(item as Map)))
+            .toList();
+        _cachedByUser[targetId] = list;
+        return list;
+      }
+
+      // Fallback: Call get_my_daily_challenges if no custom challenges exist yet
+      final fallbackResponse = await client.rpc('get_my_daily_challenges');
+      if (fallbackResponse is List) {
+        final list = fallbackResponse
             .map((item) => DailyChallenge.fromJson(Map<String, dynamic>.from(item as Map)))
             .toList();
         list.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
@@ -46,8 +57,20 @@ class SupabaseChallengesRepository implements ChallengesRepository {
       }
       return const [];
     } catch (e) {
-      debugPrint('get_my_daily_challenges RPC call error: $e');
-      // Per PRD: If the challenge request fails, surface error so UI displays retry action instead of false progress
+      debugPrint('get_student_challenges error, attempting fallback: $e');
+      try {
+        final fallbackResponse = await client.rpc('get_my_daily_challenges');
+        if (fallbackResponse is List) {
+          final list = fallbackResponse
+              .map((item) => DailyChallenge.fromJson(Map<String, dynamic>.from(item as Map)))
+              .toList();
+          list.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+          _cachedByUser[targetId] = list;
+          return list;
+        }
+      } catch (fallbackError) {
+        debugPrint('Fallback get_my_daily_challenges also failed: $fallbackError');
+      }
       rethrow;
     }
   }

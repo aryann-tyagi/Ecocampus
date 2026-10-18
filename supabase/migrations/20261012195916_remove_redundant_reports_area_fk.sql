@@ -1,0 +1,1 @@
+alter table public.reports drop constraint if exists reports_area_id_fkey;

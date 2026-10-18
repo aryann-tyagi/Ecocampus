@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/custom_bottom_nav.dart';
 import '../../../core/widgets/severity_badge.dart';
 import '../../report/data/reports_provider.dart';
 import '../../report/domain/report_model.dart';
@@ -22,13 +23,32 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
   Widget build(BuildContext context) {
     final reportsAsync = ref.watch(myReportsProvider);
 
+    final double scaffoldBottomPadding = MediaQuery.paddingOf(context).bottom;
+    final double hardwareBottomInset = MediaQuery.viewPaddingOf(context).bottom;
+
+    // When hosted inside MainNavigationShell's Scaffold(extendBody: true),
+    // Scaffold automatically includes the bottomNavigationBar height in MediaQuery.paddingOf(context).bottom.
+    // To prevent duplicating this inset, we use the Scaffold-provided bottom padding directly if available,
+    // or fallback to CustomBottomNavBar.totalHeight(context) if tested standalone without a parent Scaffold.
+    final double navBarHeight = scaffoldBottomPadding > hardwareBottomInset
+        ? scaffoldBottomPadding
+        : CustomBottomNavBar.totalHeight(context);
+
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: navBarHeight,
+            child: SafeArea(
+              bottom: false,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
             // Top Title & Subtitle
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
@@ -126,7 +146,7 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
                                   physics: const AlwaysScrollableScrollPhysics(
                                     parent: BouncingScrollPhysics(),
                                   ),
-                                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 110),
+                                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
                                   itemCount: currentList.length,
                                   itemBuilder: (context, index) {
                                     final report = currentList[index];
@@ -138,7 +158,7 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
                     ),
                   );
                 },
-                loading: () => _buildLoadingSkeleton(),
+                loading: _buildLoadingSkeleton,
                 error: (err, _) => Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24.0),
@@ -177,12 +197,16 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
           ],
         ),
       ),
-    );
+    ),
+  ],
+),
+);
   }
 
   Widget _buildEmptyState() {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
       children: [
         SizedBox(height: MediaQuery.of(context).size.height * 0.18),
         Center(
@@ -251,6 +275,7 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
     final dateStr = DateFormat('dd MMM yyyy, h:mm a').format(report.createdAt);
 
     return Container(
+      key: ValueKey('report-card-${report.id}'),
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -449,7 +474,7 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
 
   Widget _buildLoadingSkeleton() {
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 110),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
       itemCount: 4,
       itemBuilder: (ctx, i) => Container(
         margin: const EdgeInsets.only(bottom: 14),
