@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 💻 EcoCampus Web Administration Dashboard
 
-## Getting Started
+The operations and department management web console for the **EcoCampus** platform, built with **Next.js 16 (App Router)**, **TypeScript**, and **Tailwind CSS**.
 
-First, run the development server:
+---
 
+## 🌟 Key Features
+
+- **Operational KPI Overview:** Live metrics tracking total, open, in-progress, and resolved issues, as well as EcoPoints awarded and average resolution time.
+- **Issue Triage Queue:** Filter, search, and sort reports by status, category, severity, department, and submission date.
+- **Issue Detail & Department Assignment:** Update lifecycle status (`REPORTED` $\rightarrow$ `ASSIGNED` $\rightarrow$ `IN_PROGRESS` $\rightarrow$ `RESOLVED`), assign departments, add internal maintenance notes, view photos via signed URLs, and link duplicate issues.
+- **Soft Deletion Modal:** Safely mark reports as soft-deleted with an audit trail without compromising historical data integrity.
+- **Challenge Management:** Create and schedule campus-wide sustainability challenges with point rewards.
+- **Notice Management:** Publish and manage urgent sustainability alerts and announcements for the student mobile app.
+- **Role-Based Authentication:** Protected routes for Administrators and Department Staff via Supabase Auth.
+
+---
+
+## 🛠️ Tech Stack
+
+- **Framework:** Next.js 16 (React 19, Turbopack)
+- **Styling:** Tailwind CSS v4
+- **Icons:** `lucide-react`
+- **Backend Integration:** `@supabase/ssr`, `@supabase/supabase-js`
+- **Language:** TypeScript 5
+
+---
+
+## 🚀 Getting Started
+
+### 1. Install Dependencies
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Configure Environment Variables
+Create `.env.local` in this directory:
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://<your-project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 3. Run Development Server
+```bash
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open [http://localhost:3000](http://localhost:3000) to access the console.
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## 🧪 Testing & Linting
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+# Run unit and integration tests
+npm test
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+# Run ESLint
+npm run lint
+```
