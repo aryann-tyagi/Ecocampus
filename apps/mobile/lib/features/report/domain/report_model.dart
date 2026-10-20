@@ -334,6 +334,11 @@ class ReportModel {
   final String? resolutionNote;
   final double? latitude;
   final double? longitude;
+  final DateTime? deletedAt;
+  final String? deletedBy;
+  final String? deletionReason;
+
+  bool get isDeleted => deletedAt != null;
 
   const ReportModel({
     required this.id,
@@ -358,6 +363,9 @@ class ReportModel {
     this.resolutionNote,
     this.latitude,
     this.longitude,
+    this.deletedAt,
+    this.deletedBy,
+    this.deletionReason,
   });
 
   /// Factory constructor to parse from Supabase `reports` join query
@@ -519,6 +527,11 @@ class ReportModel {
       distanceMeters: (json['distance_meters'] as num?)?.toInt() ?? 0,
       hasCalculatedDistance: json['distance_meters'] != null,
       aiConfidence: parseDouble(json['ai_confidence']),
+      deletedAt: json['deleted_at'] != null
+          ? DateTime.tryParse(json['deleted_at'].toString())
+          : null,
+      deletedBy: json['deleted_by'] as String?,
+      deletionReason: json['deletion_reason'] as String?,
     );
   }
 
@@ -528,6 +541,7 @@ class ReportModel {
     Map<String, dynamic> json, {
     double? userLat,
     double? userLng,
+    String? signedUrl,
   }) {
     final reportId = (json['id'] as String?) ?? '';
     final buildingName = (json['building_name'] as String?)?.trim();
@@ -557,6 +571,19 @@ class ReportModel {
       distance = calculateDistanceMeters(userLat, userLng, lat, lng);
     }
 
+    final storagePath = (json['storage_path'] as String?)?.trim();
+    final mediaList = (storagePath != null && storagePath.isNotEmpty)
+        ? [
+            ReportMediaModel(
+              id: '',
+              reportId: reportId,
+              storagePath: storagePath,
+              mimeType: 'image/jpeg',
+              signedUrl: signedUrl,
+            )
+          ]
+        : const <ReportMediaModel>[];
+
     return ReportModel(
       id: reportId,
       reporterId: null, // Private: reporter identity protected across campus
@@ -577,10 +604,17 @@ class ReportModel {
           ? (DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now())
           : DateTime.now(),
       description: (json['description'] as String?)?.trim() ?? '',
+      imageUrl: signedUrl,
+      media: mediaList,
       latitude: lat,
       longitude: lng,
       distanceMeters: distance ?? 0,
       hasCalculatedDistance: distance != null,
+      deletedAt: json['deleted_at'] != null
+          ? DateTime.tryParse(json['deleted_at'].toString())
+          : null,
+      deletedBy: json['deleted_by'] as String?,
+      deletionReason: json['deletion_reason'] as String?,
     );
   }
 
@@ -607,6 +641,9 @@ class ReportModel {
     String? resolutionNote,
     double? latitude,
     double? longitude,
+    DateTime? deletedAt,
+    String? deletedBy,
+    String? deletionReason,
   }) {
     return ReportModel(
       id: id ?? this.id,
@@ -631,6 +668,9 @@ class ReportModel {
       resolutionNote: resolutionNote ?? this.resolutionNote,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
+      deletedAt: deletedAt ?? this.deletedAt,
+      deletedBy: deletedBy ?? this.deletedBy,
+      deletionReason: deletionReason ?? this.deletionReason,
     );
   }
 }

@@ -11,6 +11,8 @@
 /// - Levels: Seedling (0–49), Sprout (50–99), Sapling (100–199), Tree (200–349), Forest Guardian (350+).
 library;
 
+import 'dart:math' as math;
+
 /// A single point-earning event from the eco_point_events ledger.
 class EcoPointEvent {
   final String id;
@@ -115,27 +117,38 @@ class EcoPointsSummary {
   factory EcoPointsSummary.fromJson(Map<String, dynamic> json, {int eventCount = 0}) {
     final total = (json['total_points'] as num?)?.toInt() ?? 0;
     final score = (json['eco_score'] as num?)?.toInt() ?? (total > 100 ? 100 : total);
-    final lvl = (json['level'] as num?)?.toInt() ?? 1;
-    final title = (json['level_title'] as String?) ?? 'Seedling';
-    final nextPoints = (json['next_level_points'] as num?)?.toInt() ?? 50;
-    final prog = (json['progress_percent'] as num?)?.toDouble() ?? 0.0;
 
-    final current = EcoLevel(level: lvl, title: title, minPoints: 0);
+    // Dynamically derive current level and next level from actual EcoPoints as single source of truth
+    final current = EcoScoringRules.levelForPoints(total);
     final next = EcoScoringRules.nextLevel(current);
-    final toNext = nextPoints > total ? (nextPoints - total) : 0;
-    final progressFraction = (prog / 100.0).clamp(0.0, 1.0);
+
+    double progress;
+    int toNext;
+    int nextPoints;
+
+    if (next == null) {
+      progress = 1.0;
+      toNext = 0;
+      nextPoints = current.minPoints;
+    } else {
+      final levelRange = next.minPoints - current.minPoints;
+      final pointsInLevel = total - current.minPoints;
+      progress = levelRange > 0 ? (pointsInLevel / levelRange).clamp(0.0, 1.0) : 0.0;
+      toNext = math.max(0, next.minPoints - total);
+      nextPoints = next.minPoints;
+    }
 
     return EcoPointsSummary(
       totalPoints: total,
       ecoScore: score,
       eventCount: eventCount,
-      level: lvl,
-      levelTitle: title,
+      level: current.level,
+      levelTitle: current.title,
       nextLevelPoints: nextPoints,
-      progressPercent: prog,
+      progressPercent: progress * 100.0,
       currentLevel: current,
       nextLevel: next,
-      levelProgress: progressFraction,
+      levelProgress: progress,
       pointsToNextLevel: toNext,
     );
   }
@@ -161,7 +174,7 @@ class EcoPointsSummary {
       final levelRange = next.minPoints - current.minPoints;
       final pointsInLevel = totalPoints - current.minPoints;
       progress = levelRange > 0 ? (pointsInLevel / levelRange).clamp(0.0, 1.0) : 0.0;
-      toNext = next.minPoints - totalPoints;
+      toNext = math.max(0, next.minPoints - totalPoints);
       nextPoints = next.minPoints;
     }
 
@@ -179,6 +192,7 @@ class EcoPointsSummary {
       pointsToNextLevel: toNext,
     );
   }
+
 }
 
 /// Leaderboard entry returned by get_campus_leaderboard RPC.

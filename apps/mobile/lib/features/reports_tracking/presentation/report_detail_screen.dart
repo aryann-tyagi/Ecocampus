@@ -65,6 +65,72 @@ class ReportDetailScreen extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Prominent Deletion Banner if Removed
+            if (report.isDeleted) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 18),
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(color: const Color(0xFFFCA5A5)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFDC2626).withValues(alpha: 0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.shield_outlined,
+                      color: Color(0xFFDC2626),
+                      size: 24,
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            report.deletedAt != null
+                                ? 'Report Removed by Admin on ${DateFormat('dd MMMM yyyy').format(report.deletedAt!)}'
+                                : 'Report Removed by Administrator',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                              color: Color(0xFF991B1B),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Reason: ${report.deletionReason?.trim().isNotEmpty == true ? report.deletionReason! : "This report was removed by an administrator."}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF7F1D1D),
+                              height: 1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'This report is no longer active in campus feeds or repair queues, but remains in your personal history for reference.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: const Color(0xFF991B1B).withValues(alpha: 0.8),
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             // Status Timeline Card
             _buildTimelineCard(report),
 

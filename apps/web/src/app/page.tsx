@@ -43,6 +43,7 @@ export default function AdminDashboardPage() {
     inProgress: 0,
     resolved: 0,
     critical: 0,
+    deleted: 0,
   });
 
   const [isLoadingReports, setIsLoadingReports] = useState(true);
@@ -131,20 +132,29 @@ export default function AdminDashboardPage() {
     setIsLoadingMetrics(true);
 
     try {
-      // Query counts per status
-      const [totalRes, reportedRes, assignedRes, progressRes, resolvedRes, criticalRes] =
-        await Promise.all([
-          supabase.from('reports').select('id', { count: 'exact', head: true }),
-          supabase.from('reports').select('id', { count: 'exact', head: true }).eq('status', 'REPORTED'),
-          supabase.from('reports').select('id', { count: 'exact', head: true }).eq('status', 'ASSIGNED'),
-          supabase.from('reports').select('id', { count: 'exact', head: true }).eq('status', 'IN_PROGRESS'),
-          supabase.from('reports').select('id', { count: 'exact', head: true }).eq('status', 'RESOLVED'),
-          supabase
-            .from('reports')
-            .select('id', { count: 'exact', head: true })
-            .eq('severity', 'critical')
-            .neq('status', 'RESOLVED'),
-        ]);
+      // Query counts per status, differentiating active from soft-deleted
+      const [
+        totalRes,
+        reportedRes,
+        assignedRes,
+        progressRes,
+        resolvedRes,
+        criticalRes,
+        deletedRes,
+      ] = await Promise.all([
+        supabase.from('reports').select('id', { count: 'exact', head: true }).is('deleted_at', null),
+        supabase.from('reports').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('status', 'REPORTED'),
+        supabase.from('reports').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('status', 'ASSIGNED'),
+        supabase.from('reports').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('status', 'IN_PROGRESS'),
+        supabase.from('reports').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('status', 'RESOLVED'),
+        supabase
+          .from('reports')
+          .select('id', { count: 'exact', head: true })
+          .is('deleted_at', null)
+          .eq('severity', 'critical')
+          .neq('status', 'RESOLVED'),
+        supabase.from('reports').select('id', { count: 'exact', head: true }).not('deleted_at', 'is', null),
+      ]);
 
       setMetrics({
         total: totalRes.count || 0,
@@ -153,6 +163,7 @@ export default function AdminDashboardPage() {
         inProgress: progressRes.count || 0,
         resolved: resolvedRes.count || 0,
         critical: criticalRes.count || 0,
+        deleted: deletedRes.count || 0,
       });
     } catch (err) {
       console.error('Failed to load metrics:', err);
@@ -182,11 +193,21 @@ export default function AdminDashboardPage() {
         .order('created_at', { ascending: false })
         .limit(100);
 
-      // Apply Status filter (or custom critical shortcut)
-      if (statusFilter === 'CRITICAL') {
-        query = query.eq('severity', 'critical').neq('status', 'RESOLVED');
-      } else if (statusFilter) {
-        query = query.eq('status', statusFilter);
+      // Apply Soft-Deletion filter vs Active Queue
+      if (statusFilter === 'REMOVED') {
+        query = query.not('deleted_at', 'is', null);
+      } else if (statusFilter === 'ALL_WITH_REMOVED') {
+        // Do not filter on deleted_at
+      } else {
+        // Standard admin queue shows active non-deleted issues
+        query = query.is('deleted_at', null);
+
+        // Apply Status filter (or custom critical shortcut)
+        if (statusFilter === 'CRITICAL') {
+          query = query.eq('severity', 'critical').neq('status', 'RESOLVED');
+        } else if (statusFilter) {
+          query = query.eq('status', statusFilter);
+        }
       }
 
       // Apply Category filter
@@ -471,6 +492,7 @@ export default function AdminDashboardPage() {
               onSelectReport={(report) => setSelectedReport(report)}
               isLoading={isLoadingReports}
               error={error}
+              userRole={userRole}
               onRefresh={() => {
                 loadMetrics();
                 loadReports();

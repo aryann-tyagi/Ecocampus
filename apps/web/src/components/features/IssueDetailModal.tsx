@@ -11,6 +11,7 @@ import {
 import { CategoryBadge, SeverityBadge, StatusBadge } from '@/components/ui/Badge';
 import { formatDate, resolveReportTitle } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
+import { DeleteReportModal } from '@/components/features/DeleteReportModal';
 import {
   X,
   MapPin,
@@ -25,6 +26,10 @@ import {
   ArrowRight,
   MessageSquare,
   Sparkles,
+  Trash2,
+  ShieldAlert,
+  User,
+  Info,
 } from 'lucide-react';
 
 interface IssueDetailModalProps {
@@ -62,6 +67,9 @@ export function IssueDetailModal({
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Soft delete modal state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+
   const supabase = createClient();
   const isAdmin = userRole === 'admin';
   const isStaff = userRole === 'staff';
@@ -69,6 +77,8 @@ export function IssueDetailModal({
     isStaff &&
     Boolean(userDepartmentId) &&
     report.assigned_department_id === userDepartmentId;
+
+  const isDeleted = Boolean(report.deleted_at);
 
   // 1. Fetch authorized signed URL for photo preview
   useEffect(() => {
@@ -132,7 +142,7 @@ export function IssueDetailModal({
 
   // Handle department assignment
   async function handleAssignDepartment() {
-    if (!selectedDeptId || selectedDeptId === report.assigned_department_id) return;
+    if (!selectedDeptId || selectedDeptId === report.assigned_department_id || isDeleted) return;
     if (!isAdmin) {
       setAssignmentError('Only administrators can assign departments.');
       return;
@@ -180,7 +190,7 @@ export function IssueDetailModal({
 
   // Handle status transition execution
   async function handleTransition(newStatus: ReportStatus, noteText?: string) {
-    if (isTransitioning) return;
+    if (isTransitioning || isDeleted) return;
 
     setIsTransitioning(true);
     setTransitionError(null);
@@ -238,384 +248,504 @@ export function IssueDetailModal({
     }
   }
 
+  function handleDeletionSuccess(_reportId: string, _reason: string) {
+    setSuccessMessage('Report has been successfully removed from active queues.');
+    onReportUpdated(report.id);
+  }
+
   const buildingName = report.buildings?.name ?? 'Campus Building';
   const floorDisplay = report.floors?.label ?? (report.floor_text ? `Floor ${report.floor_text}` : 'General Floor');
   const assignedDept = departments.find((d) => d.id === report.assigned_department_id);
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
-        {/* Header */}
-        <div className="p-5 sm:p-6 border-b border-slate-100 flex items-start justify-between bg-slate-50/70">
-          <div>
-            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-              <StatusBadge status={report.status} />
-              <SeverityBadge severity={report.severity} />
-              <CategoryBadge category={report.category} />
-              <span className="text-slate-400 text-xs font-mono">#{report.id.slice(0, 8)}</span>
+    <>
+      <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
+        <div className="bg-white rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+          {/* Header */}
+          <div className="p-5 sm:p-6 border-b border-slate-100 flex items-start justify-between bg-slate-50/70">
+            <div>
+              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                {isDeleted ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-50 text-rose-800 border border-rose-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
+                    Removed by Admin
+                  </span>
+                ) : (
+                  <StatusBadge status={report.status} />
+                )}
+                <SeverityBadge severity={report.severity} />
+                <CategoryBadge category={report.category} />
+                <span className="text-slate-400 text-xs font-mono font-medium">#{report.id.slice(0, 8)}</span>
+              </div>
+              <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-snug break-words">
+                {resolveReportTitle(report)}
+              </h2>
             </div>
-            <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-snug break-words">
-              {resolveReportTitle(report)}
-            </h2>
+
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-600 p-1.5 rounded-full hover:bg-slate-200/60 transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-1.5 rounded-full hover:bg-slate-200/60 transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Content Body */}
-        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
-          {/* Notifications / Alerts */}
-          {successMessage && (
-            <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>{successMessage}</span>
-            </div>
-          )}
-
-          {generalError && (
-            <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>{generalError}</span>
-            </div>
-          )}
-
-          {transitionError && (
-            <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>{transitionError}</span>
-            </div>
-          )}
-
-          {/* Section 1: Overview & Location Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Description & Metadata */}
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                  Issue Description
-                </label>
-                <div className="p-3.5 bg-slate-50 rounded-xl text-slate-800 text-xs leading-relaxed border border-slate-100 whitespace-pre-wrap">
-                  {report.description}
+          {/* Prominent Deletion Warning Banner if Soft-Deleted */}
+          {isDeleted && (
+            <div className="px-5 py-3.5 bg-rose-50 border-b border-rose-200 flex items-start gap-3">
+              <ShieldAlert className="w-5 h-5 text-rose-700 shrink-0 mt-0.5" />
+              <div className="text-xs space-y-1">
+                <div className="font-bold text-rose-900">
+                  This report was removed by an administrator on {formatDate(report.deleted_at)}
                 </div>
+                <p className="text-rose-800">
+                  <span className="font-semibold">Reason provided:</span>{' '}
+                  {report.deletion_reason || 'Administrative removal'}
+                </p>
+                <p className="text-rose-600 text-[11px]">
+                  The record is preserved for audit history and remains visible with this explanation in the owning student’s account.
+                </p>
               </div>
-
-              {/* AI Suggestion tag if available */}
-              {report.suggested_department_label && (
-                <div className="p-3 bg-amber-50/60 border border-amber-200/60 rounded-xl text-xs flex items-start gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold text-amber-900">AI Suggested Department:</span>
-                    <p className="text-amber-800 text-[11px] mt-0.5">
-                      {report.suggested_department_label}
-                    </p>
-                  </div>
-                </div>
-              )}
             </div>
+          )}
 
-            {/* Location & Photo Box */}
-            <div className="space-y-3">
-              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                  Physical Campus Location
-                </label>
+          {/* Content Body */}
+          <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+            {/* Notifications / Alerts */}
+            {successMessage && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{successMessage}</span>
+              </div>
+            )}
 
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-800">
-                  <Building2 className="w-4 h-4 text-[#144D37]" />
-                  <span>{buildingName}</span>
+            {generalError && (
+              <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{generalError}</span>
+              </div>
+            )}
+
+            {transitionError && (
+              <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{transitionError}</span>
+              </div>
+            )}
+
+            {/* Section 1: Overview & Location Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Description & Reporter info */}
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                    Issue Description
+                  </label>
+                  <p className="text-xs text-slate-700 bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80 whitespace-pre-wrap leading-relaxed">
+                    {report.description || 'No detailed description supplied.'}
+                  </p>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs text-slate-600">
-                  <Layers className="w-4 h-4 text-slate-400" />
-                  <span>{floorDisplay}</span>
-                </div>
-
-                <div className="flex items-center gap-2 text-xs text-slate-600">
-                  <MapPin className="w-4 h-4 text-slate-400" />
-                  <span className="font-medium text-slate-900">
-                    {report.location_details || 'No exact room specified'}
+                {/* Reporter identity snippet */}
+                <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                  <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="font-medium text-slate-500">Reporter:</span>
+                  <span className="font-mono text-slate-800">
+                    {report.reporter_id ? `Student (#${report.reporter_id.slice(0, 8)})` : 'Campus Community'}
                   </span>
                 </div>
 
-                <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-200/60 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>Submitted {formatDate(report.created_at)}</span>
-                </div>
-              </div>
-
-              {/* Photo preview */}
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                  Attached Issue Photograph
-                </label>
-                {isLoadingPhoto ? (
-                  <div className="h-40 bg-slate-100 rounded-xl flex items-center justify-center animate-pulse">
-                    <span className="text-xs text-slate-400">Loading authorized photo...</span>
-                  </div>
-                ) : photoUrl ? (
-                  <div className="relative rounded-xl overflow-hidden border border-slate-200 max-h-48 bg-slate-950 flex items-center justify-center">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={photoUrl}
-                      alt={report.title}
-                      className="max-h-48 w-full object-contain"
-                    />
-                  </div>
-                ) : (
-                  <div className="h-28 bg-slate-50 rounded-xl border border-slate-100 flex flex-col items-center justify-center text-slate-400 gap-1.5">
-                    <ImageIcon className="w-6 h-6" />
-                    <span className="text-xs">No photograph attached</span>
+                {/* AI / Suggested department */}
+                {report.suggested_department_label && (
+                  <div className="flex items-start gap-2 text-xs bg-emerald-50/60 border border-emerald-200/60 p-3 rounded-xl">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-700 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold text-emerald-950">AI Suggested Department: </span>
+                      <span className="text-emerald-800">{report.suggested_department_label}</span>
+                    </div>
                   </div>
                 )}
               </div>
-            </div>
-          </div>
 
-          {/* Section 2: Department Assignment Controls */}
-          <div className="p-4 bg-emerald-50/40 rounded-2xl border border-emerald-100/80 space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-[#144D37] uppercase tracking-wider flex items-center gap-1.5">
-                <Wrench className="w-4 h-4" />
-                Responsible Campus Department
-              </label>
-              {assignedDept ? (
-                <span className="text-xs font-semibold text-emerald-800 bg-emerald-100/70 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                  Assigned: {assignedDept.name}
-                </span>
-              ) : (
-                <span className="text-xs font-semibold text-amber-700 bg-amber-100/60 px-2.5 py-0.5 rounded-full">
-                  Unassigned
-                </span>
-              )}
-            </div>
+              {/* Location & Metadata card */}
+              <div className="space-y-3">
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2.5">
+                  <div className="flex items-center gap-2 text-xs text-slate-800 font-semibold">
+                    <Building2 className="w-4 h-4 text-[#144D37]" />
+                    <span>{buildingName}</span>
+                  </div>
 
-            {isAdmin ? (
-              <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
-                <select
-                  value={selectedDeptId}
-                  onChange={(e) => setSelectedDeptId(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#144D37]"
-                >
-                  <option value="">— Select Responsible Department —</option>
-                  {departments.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
+                  <div className="flex items-center gap-2 text-xs text-slate-600">
+                    <MapPin className="w-4 h-4 text-[#144D37]" />
+                    <span>
+                      {floorDisplay} · {report.location_details || 'General Campus Space'}
+                    </span>
+                  </div>
 
-                <button
-                  onClick={handleAssignDepartment}
-                  disabled={!selectedDeptId || selectedDeptId === report.assigned_department_id || isAssigning}
-                  className="px-4 py-2 bg-[#144D37] hover:bg-[#0f3a29] text-white text-xs font-bold rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shrink-0"
-                >
-                  {isAssigning ? 'Assigning...' : 'Save Assignment'}
-                </button>
-              </div>
-            ) : (
-              <p className="text-xs text-slate-600">
-                {assignedDept
-                  ? `This issue is assigned to ${assignedDept.name}.`
-                  : 'This report has not been assigned a department by campus administrators.'}
-              </p>
-            )}
+                  <div className="flex items-center gap-2 text-xs text-slate-500 pt-1 border-t border-slate-200/60">
+                    <Calendar className="w-4 h-4 text-slate-400" />
+                    <span>Submitted on {formatDate(report.created_at)}</span>
+                  </div>
 
-            {assignmentError && (
-              <p className="text-xs text-rose-600 font-medium">{assignmentError}</p>
-            )}
-          </div>
+                  {report.updated_at && (
+                    <div className="text-[11px] text-slate-400">
+                      Last updated {formatDate(report.updated_at)}
+                    </div>
+                  )}
+                </div>
 
-          {/* Section 3: Status Transition Workflow Controls */}
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
-              Workflow Status Actions
-            </label>
-
-            <div className="flex flex-wrap items-center gap-2.5">
-              {/* If REPORTED: Admin can advance to ASSIGNED or IN_PROGRESS */}
-              {report.status === 'REPORTED' && (
-                <>
-                  {isAdmin ? (
-                    <>
-                      <button
-                        onClick={() => handleTransition('IN_PROGRESS', 'Admin initiated investigation and work.')}
-                        disabled={isTransitioning}
-                        className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                {/* Attached Photo Preview */}
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5" />
+                      Attached Photo
+                    </span>
+                    {photoUrl && (
+                      <a
+                        href={photoUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] font-semibold text-[#144D37] hover:underline"
                       >
-                        <Wrench className="w-3.5 h-3.5" />
-                        Start Investigation (In Progress)
-                      </button>
+                        Open full size
+                      </a>
+                    )}
+                  </div>
+
+                  {isLoadingPhoto ? (
+                    <div className="h-32 w-full bg-slate-200 animate-pulse rounded-xl" />
+                  ) : photoUrl ? (
+                    <div className="relative rounded-xl overflow-hidden border border-slate-200 bg-black/5">
+                      <img
+                        src={photoUrl}
+                        alt="Issue photo"
+                        className="w-full h-40 object-cover hover:scale-105 transition duration-300"
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-24 w-full bg-white rounded-xl border border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 text-xs">
+                      <ImageIcon className="w-6 h-6 mb-1 text-slate-300" />
+                      <span>No photo attached to this report</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: Department Assignment Controls */}
+            {!isDeleted && (
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Department Assignment
+                  </label>
+                  {isAdmin && (
+                    <span className="text-[11px] text-slate-400 font-medium">
+                      Admin Authority
+                    </span>
+                  )}
+                </div>
+
+                {isAdmin ? (
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <select
+                      value={selectedDeptId}
+                      onChange={(e) => setSelectedDeptId(e.target.value)}
+                      className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#144D37]"
+                    >
+                      <option value="">— Select Responsible Department —</option>
+                      {departments.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      onClick={handleAssignDepartment}
+                      disabled={!selectedDeptId || selectedDeptId === report.assigned_department_id || isAssigning}
+                      className="px-4 py-2 bg-[#144D37] hover:bg-[#0f3a29] text-white text-xs font-bold rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shrink-0"
+                    >
+                      {isAssigning ? 'Assigning...' : 'Save Assignment'}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-600">
+                    {assignedDept
+                      ? `This issue is assigned to ${assignedDept.name}.`
+                      : 'This report has not been assigned a department by campus administrators.'}
+                  </p>
+                )}
+
+                {assignmentError && (
+                  <p className="text-xs text-rose-600 font-medium">{assignmentError}</p>
+                )}
+              </div>
+            )}
+
+            {/* Section 3: Status Transition Workflow & Deletion Controls */}
+            {!isDeleted && (
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Workflow Actions
+                  </label>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteModal(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold text-rose-700 hover:text-rose-800 hover:bg-rose-100/70 border border-rose-200/80 bg-rose-50/60 rounded-xl transition shadow-2xs"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete Report
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {/* If REPORTED: Admin can advance to IN_PROGRESS */}
+                  {report.status === 'REPORTED' && (
+                    <>
+                      {isAdmin ? (
+                        <button
+                          onClick={() => handleTransition('IN_PROGRESS', 'Admin initiated investigation and work.')}
+                          disabled={isTransitioning}
+                          className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                        >
+                          <Wrench className="w-3.5 h-3.5" />
+                          Start Investigation (In Progress)
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-500 italic">
+                          Awaiting administrative triage and assignment.
+                        </span>
+                      )}
                     </>
-                  ) : (
-                    <span className="text-xs text-slate-500 italic">
-                      Awaiting administrative triage and assignment.
-                    </span>
                   )}
-                </>
-              )}
 
-              {/* If ASSIGNED: Assigned Staff or Admin can start work */}
-              {report.status === 'ASSIGNED' && (
-                <>
-                  {(isAdmin || isAssignedStaff) ? (
-                    <button
-                      onClick={() => handleTransition('IN_PROGRESS', 'Department technician initiated work on site.')}
-                      disabled={isTransitioning}
-                      className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs disabled:opacity-50"
-                    >
-                      <Wrench className="w-3.5 h-3.5" />
-                      Begin Work (In Progress)
-                    </button>
-                  ) : (
-                    <span className="text-xs text-slate-500 italic">
-                      Only assigned department staff ({assignedDept?.name ?? 'Assigned Dept'}) or administrators can begin work.
-                    </span>
+                  {/* If ASSIGNED: Assigned Staff or Admin can start work */}
+                  {report.status === 'ASSIGNED' && (
+                    <>
+                      {(isAdmin || isAssignedStaff) ? (
+                        <button
+                          onClick={() => handleTransition('IN_PROGRESS', 'Department technician initiated work on site.')}
+                          disabled={isTransitioning}
+                          className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                        >
+                          <Wrench className="w-3.5 h-3.5" />
+                          Begin Work (In Progress)
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-500 italic">
+                          Only assigned department staff ({assignedDept?.name ?? 'Assigned Dept'}) or administrators can begin work.
+                        </span>
+                      )}
+                    </>
                   )}
-                </>
-              )}
 
-              {/* If IN_PROGRESS: Assigned Staff or Admin can resolve */}
-              {report.status === 'IN_PROGRESS' && (
-                <>
-                  {(isAdmin || isAssignedStaff) ? (
-                    <button
-                      onClick={() => setShowResolveDialog(true)}
-                      disabled={isTransitioning}
-                      className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs disabled:opacity-50"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Mark Issue as Resolved
-                    </button>
-                  ) : (
-                    <span className="text-xs text-slate-500 italic">
-                      Active work underway by {assignedDept?.name ?? 'assigned department'}.
-                    </span>
+                  {/* If IN_PROGRESS: Assigned Staff or Admin can resolve */}
+                  {report.status === 'IN_PROGRESS' && (
+                    <>
+                      {(isAdmin || isAssignedStaff) ? (
+                        <button
+                          onClick={() => setShowResolveDialog(true)}
+                          disabled={isTransitioning}
+                          className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Mark Issue as Resolved
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-500 italic">
+                          Active work underway by {assignedDept?.name ?? 'assigned department'}.
+                        </span>
+                      )}
+                    </>
                   )}
-                </>
-              )}
 
-              {/* If RESOLVED: Display completion badge */}
-              {report.status === 'RESOLVED' && (
-                <div className="flex items-center gap-2 text-emerald-800 text-xs font-semibold bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>Issue has been successfully resolved and closed.</span>
+                  {/* If RESOLVED: Display completion badge */}
+                  {report.status === 'RESOLVED' && (
+                    <div className="flex items-center gap-2 text-emerald-800 text-xs font-semibold bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span>Issue has been successfully resolved and closed.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Resolve Prompt Dialog */}
+            {showResolveDialog && (
+              <div className="p-4 bg-emerald-50/80 rounded-2xl border border-emerald-200 space-y-3 animate-in fade-in duration-150">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-900 uppercase tracking-wide">
+                    Resolution Note (Required)
+                  </span>
+                  <button
+                    onClick={() => setShowResolveDialog(false)}
+                    className="text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <textarea
+                  value={resolutionNote}
+                  onChange={(e) => setResolutionNote(e.target.value)}
+                  placeholder="Explain the corrective actions taken (e.g. Replaced faulty washer, cleared bin overflow, tightened connection)..."
+                  rows={3}
+                  className="w-full p-2.5 text-xs bg-white border border-emerald-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                />
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowResolveDialog(false)}
+                    className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200/50 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleTransition('RESOLVED', resolutionNote)}
+                    disabled={!resolutionNote.trim() || isTransitioning}
+                    className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-40"
+                  >
+                    {isTransitioning ? 'Resolving...' : 'Confirm & Close Issue'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Section 4: Audit & Lifecycle Timeline */}
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <History className="w-3.5 h-3.5" />
+                Audit Trail & Status History
+              </label>
+
+              {isLoadingTimeline ? (
+                <div className="space-y-2">
+                  <div className="h-10 bg-slate-100 rounded-xl animate-pulse" />
+                  <div className="h-10 bg-slate-100 rounded-xl animate-pulse" />
+                </div>
+              ) : (timelineEvents.length === 0 && !report.deleted_at) ? (
+                <div className="text-xs text-slate-400 italic bg-slate-50 p-4 rounded-xl border border-dashed border-slate-200 text-center">
+                  No status transition events recorded yet.
+                </div>
+              ) : (
+                <div className="relative pl-6 space-y-4 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+                  {timelineEvents.map((evt) => {
+                    const isResolve = evt.to_status === 'RESOLVED';
+                    const isDeletion = evt.note?.toLowerCase().includes('removed by administrator');
+                    return (
+                      <div key={evt.id} className="relative text-xs group">
+                        <div
+                          className={`absolute -left-6 top-0.5 w-4 h-4 rounded-full border-2 bg-white flex items-center justify-center ${
+                            isDeletion
+                              ? 'border-rose-600'
+                              : isResolve
+                              ? 'border-emerald-600'
+                              : 'border-[#144D37]'
+                          }`}
+                        >
+                          <div
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              isDeletion
+                                ? 'bg-rose-600'
+                                : isResolve
+                                ? 'bg-emerald-600'
+                                : 'bg-[#144D37]'
+                            }`}
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-900">
+                            {isDeletion
+                              ? 'Report Removed'
+                              : evt.from_status
+                              ? `${evt.from_status} → ${evt.to_status}`
+                              : `Initial status: ${evt.to_status}`}
+                          </span>
+                          <span className="text-slate-400 text-[11px]">
+                            {formatDate(evt.occurred_at)}
+                          </span>
+                        </div>
+
+                        {evt.note && (
+                          <div
+                            className={`mt-1 p-2 rounded-lg text-[11px] leading-relaxed ${
+                              isDeletion
+                                ? 'bg-rose-50 text-rose-800 border border-rose-200'
+                                : 'bg-slate-50 text-slate-600 border border-slate-200/60'
+                            }`}
+                          >
+                            <MessageSquare className="w-3 h-3 inline mr-1 opacity-70" />
+                            {evt.note}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Dedicated administrative removal audit event in timeline */}
+                  {report.deleted_at && (
+                    <div className="relative text-xs group">
+                      <div className="absolute -left-6 top-0.5 w-4 h-4 rounded-full border-2 bg-white flex items-center justify-center border-rose-600">
+                        <div className="w-1.5 h-1.5 rounded-full bg-rose-600" />
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-rose-900">
+                          Report Removed by Administrator
+                        </span>
+                        <span className="text-slate-400 text-[11px]">
+                          {formatDate(report.deleted_at)}
+                        </span>
+                      </div>
+
+                      {report.deletion_reason && (
+                        <div className="mt-1 p-2 rounded-lg text-[11px] leading-relaxed bg-rose-50 text-rose-800 border border-rose-200">
+                          <MessageSquare className="w-3 h-3 inline mr-1 opacity-70" />
+                          Reason: {report.deletion_reason}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           </div>
 
-          {/* Resolve Prompt Dialog */}
-          {showResolveDialog && (
-            <div className="p-4 bg-emerald-50/80 rounded-2xl border border-emerald-200 space-y-3 animate-in fade-in duration-150">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-emerald-900 uppercase tracking-wide">
-                  Resolution Note (Required)
-                </span>
-                <button
-                  onClick={() => setShowResolveDialog(false)}
-                  className="text-slate-400 hover:text-slate-600"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+          {/* Modal Footer */}
+          <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/80 flex items-center justify-between">
+            <span className="text-slate-400 text-xs font-mono">
+              ID: {report.id}
+            </span>
 
-              <textarea
-                value={resolutionNote}
-                onChange={(e) => setResolutionNote(e.target.value)}
-                placeholder="Explain the corrective actions taken (e.g. Replaced faulty washer, cleared bin overflow, tightened connection)..."
-                rows={3}
-                className="w-full p-2.5 text-xs bg-white border border-emerald-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600"
-              />
-
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowResolveDialog(false)}
-                  className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200/50 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleTransition('RESOLVED', resolutionNote)}
-                  disabled={!resolutionNote.trim() || isTransitioning}
-                  className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-40"
-                >
-                  {isTransitioning ? 'Resolving...' : 'Confirm & Close Issue'}
-                </button>
-              </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold rounded-xl transition"
+              >
+                Close Window
+              </button>
             </div>
-          )}
-
-          {/* Section 4: Chronological Audit Trail Timeline */}
-          <div className="space-y-3 pt-2">
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-              <History className="w-4 h-4 text-slate-400" />
-              Status & Assignment History Timeline
-            </label>
-
-            {isLoadingTimeline ? (
-              <div className="h-16 bg-slate-100 rounded-xl animate-pulse" />
-            ) : timelineEvents.length === 0 ? (
-              <p className="text-xs text-slate-400 italic">No historical events recorded.</p>
-            ) : (
-              <div className="relative pl-6 space-y-4 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-                {timelineEvents.map((ev, idx) => (
-                  <div key={ev.id || idx} className="relative group text-xs">
-                    {/* Timeline dot */}
-                    <div className="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-[#144D37] border-2 border-white shadow-xs" />
-
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                          {ev.from_status ? (
-                            <>
-                              <span>{ev.from_status}</span>
-                              <ArrowRight className="w-3 h-3 text-slate-400" />
-                              <span className="text-[#144D37]">{ev.to_status}</span>
-                            </>
-                          ) : (
-                            <span className="text-[#144D37]">{ev.to_status}</span>
-                          )}
-                        </div>
-
-                        <span className="text-[11px] text-slate-400">
-                          {formatDate(ev.occurred_at)}
-                        </span>
-                      </div>
-
-                      {ev.note && (
-                        <p className="text-slate-600 mt-1 text-[11px] flex items-start gap-1">
-                          <MessageSquare className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
-                          <span>{ev.note}</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </div>
-
-        {/* Modal Footer */}
-        <div className="p-4 px-6 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-          <span className="text-[11px] text-slate-400">
-            EcoCampus Administrative Authority · Changes synchronize immediately with student apps
-          </span>
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold rounded-xl transition"
-          >
-            Close Details
-          </button>
-        </div>
       </div>
-    </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <DeleteReportModal
+          report={report}
+          isOpen={showDeleteModal}
+          onClose={() => setShowDeleteModal(false)}
+          onSuccess={handleDeletionSuccess}
+        />
+      )}
+    </>
   );
 }

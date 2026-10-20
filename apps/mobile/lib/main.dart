@@ -80,6 +80,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         index: _currentIndex,
         children: [
           StudentHomeScreen(
+            isActive: _currentIndex == 0,
             onNavigateToReports: () {
               if (mounted) setState(() => _currentIndex = 2);
             },

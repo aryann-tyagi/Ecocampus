@@ -1,0 +1,13 @@
+{
+  "name": "ecocampus",
+  "version": "1.0.0",
+  "private": true,
+  "description": "EcoCampus smart sustainability platform monorepo",
+  "scripts": {
+    "dev": "npm --prefix apps/web run dev",
+    "dev:web": "npm --prefix apps/web run dev",
+    "build:web": "npm --prefix apps/web run build",
+    "test:web": "npm --prefix apps/web test",
+    "lint:web": "npm --prefix apps/web run lint"
+  }
+}

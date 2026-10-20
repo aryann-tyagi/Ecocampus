@@ -376,14 +376,21 @@ class ReportsRepository {
       });
 
       if (result is List) {
-        return result.whereType<Map>().map((row) {
+        final rawList = result.whereType<Map>().toList();
+        return await Future.wait(rawList.map((row) async {
           final json = row.cast<String, dynamic>();
+          final storagePath = (json['storage_path'] as String?)?.trim();
+          String? signedUrl;
+          if (storagePath != null && storagePath.isNotEmpty) {
+            signedUrl = await getSignedPhotoUrl(storagePath);
+          }
           return ReportModel.fromCampusIssueFeedJson(
             json,
             userLat: userLat,
             userLng: userLng,
+            signedUrl: signedUrl,
           );
-        }).toList();
+        }));
       }
     } catch (e) {
       debugPrint('get_campus_issue_feed RPC failed: $e');

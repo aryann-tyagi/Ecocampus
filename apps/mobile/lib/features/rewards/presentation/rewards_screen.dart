@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/custom_bottom_nav.dart';
-import '../../../core/widgets/sprig_mascot.dart';
 import '../../auth/data/auth_providers.dart';
 import '../../profile/data/profile_providers.dart';
 import '../data/eco_points_provider.dart';
@@ -13,6 +12,7 @@ import '../domain/achievement_model.dart';
 import '../data/challenges_provider.dart';
 import '../domain/daily_challenge_model.dart';
 import '../../report/presentation/report_issue_screen.dart';
+import 'widgets/rewards_sapling_progress_header.dart';
 
 class RewardsScreen extends ConsumerStatefulWidget {
   final bool isActive;
@@ -103,142 +103,12 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
                   child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 1. Top Header Row
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Rewards',
-                      style: AppTextStyles.titleLarge.copyWith(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF144D37).withValues(alpha: 0.05),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Text(
-                        'Level ${summary.currentLevel.level} of ${EcoScoringRules.levels.length}',
-                        style: AppTextStyles.labelMedium.copyWith(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
+                // 1. Rewards Sapling Progress Dashboard Header (Recreated visual reference)
+                RewardsSaplingProgressHeader(
+                  summary: summary,
+                  isActive: widget.isActive,
                 ),
-
                 const SizedBox(height: 18),
-
-                // 2. Rank / Level Card
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [
-                        Color(0xFFC7F3DD),
-                        Color(0xFFE2FAF0),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(28),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF144D37).withValues(alpha: 0.08),
-                        blurRadius: 18,
-                        offset: const Offset(0, 6),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      // Sprig inside circular progress frame
-                      Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Container(
-                            width: 108,
-                            height: 108,
-                            decoration: const BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          SizedBox(
-                            width: 114,
-                            height: 114,
-                            child: CircularProgressIndicator(
-                              value: summary.levelProgress,
-                              strokeWidth: 6,
-                              backgroundColor: Colors.white.withValues(alpha: 0.5),
-                              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF1EA05A)),
-                            ),
-                          ),
-                          const SprigMascot(size: 84, animated: false),
-                        ],
-                      ),
-
-                      const SizedBox(width: 20),
-
-                      // User Rank Details
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Your level',
-                              style: AppTextStyles.bodySmall.copyWith(
-                                color: AppColors.inkSecondary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              summary.currentLevel.title,
-                              style: AppTextStyles.titleMedium.copyWith(
-                                fontSize: 24,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '${summary.totalPoints} EcoPoints',
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF168047),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              summary.nextLevel != null
-                                  ? 'Next: ${summary.nextLevel!.title} · Level ${summary.nextLevel!.level} (${summary.pointsToNextLevel} pts to go)'
-                                  : 'Max level reached! 🌟',
-                              style: AppTextStyles.bodySmall.copyWith(
-                                fontSize: 12,
-                                color: AppColors.inkSecondary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
 
                 const SizedBox(height: 16),
 

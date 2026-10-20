@@ -9,6 +9,7 @@ enum NotificationEventType {
   reportDuplicate,
   adminNewReport,
   staffIssueAssigned,
+  reportDeleted,
   other;
 
   static NotificationEventType fromDbValue(String? value) {
@@ -30,6 +31,8 @@ enum NotificationEventType {
         return NotificationEventType.adminNewReport;
       case 'staff_issue_assigned':
         return NotificationEventType.staffIssueAssigned;
+      case 'report_deleted':
+        return NotificationEventType.reportDeleted;
       default:
         return NotificationEventType.other;
     }
@@ -53,6 +56,8 @@ enum NotificationEventType {
         return 'admin_new_report';
       case NotificationEventType.staffIssueAssigned:
         return 'staff_issue_assigned';
+      case NotificationEventType.reportDeleted:
+        return 'report_deleted';
       case NotificationEventType.other:
         return 'other';
     }
@@ -145,6 +150,8 @@ class NotificationModel {
         return Icons.campaign_rounded;
       case NotificationEventType.staffIssueAssigned:
         return Icons.build_circle_rounded;
+      case NotificationEventType.reportDeleted:
+        return Icons.remove_circle_outline_rounded;
       case NotificationEventType.other:
         return Icons.notifications_rounded;
     }
@@ -163,6 +170,7 @@ class NotificationModel {
       case NotificationEventType.adminNewReport:
         return const Color(0xFF2563EB);
       case NotificationEventType.reportRejected:
+      case NotificationEventType.reportDeleted:
         return const Color(0xFFDC2626);
       case NotificationEventType.reportDuplicate:
         return const Color(0xFF6B7280);
@@ -184,6 +192,7 @@ class NotificationModel {
       case NotificationEventType.adminNewReport:
         return const Color(0xFFEFF6FF);
       case NotificationEventType.reportRejected:
+      case NotificationEventType.reportDeleted:
         return const Color(0xFFFEF2F2);
       case NotificationEventType.reportDuplicate:
         return const Color(0xFFF3F4F6);

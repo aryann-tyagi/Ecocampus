@@ -43,6 +43,17 @@ class ReportsNotifier extends Notifier<List<ReportModel>> {
     ref.invalidate(dailyChallengesProvider);
     ref.invalidate(buildingSummariesProvider);
   }
+
+  void softDeleteReport(String id, {String? reason}) {
+    final now = DateTime.now();
+    state = state.map((r) {
+      if (r.id == id) {
+        return r.copyWith(deletedAt: now, deletionReason: reason);
+      }
+      return r;
+    }).toList();
+    ref.invalidate(buildingSummariesProvider);
+  }
 }
 
 final reportsProvider = NotifierProvider<ReportsNotifier, List<ReportModel>>(ReportsNotifier.new);
@@ -128,8 +139,27 @@ class MyReportsNotifier extends AsyncNotifier<List<ReportModel>> {
     }).toList();
     state = AsyncValue.data(updated);
     ref.read(reportsProvider.notifier).setReports(updated);
+    // Immediately synchronize campusReportsProvider so Home feed updates
+    ref.read(campusReportsProvider.notifier).updateReportStatus(id, newStatus, resolutionNote: resolutionNote);
     ref.invalidate(achievementsProvider);
     ref.invalidate(dailyChallengesProvider);
+    ref.invalidate(buildingSummariesProvider);
+  }
+
+  /// Soft deletes a report and immediately purges it from the campus feed
+  void softDeleteReport(String id, {String? reason}) {
+    final List<ReportModel> current = state.value ?? ref.read(reportsProvider);
+    final now = DateTime.now();
+    final updated = current.map((r) {
+      if (r.id == id) {
+        return r.copyWith(deletedAt: now, deletionReason: reason);
+      }
+      return r;
+    }).toList();
+    state = AsyncValue.data(updated);
+    ref.read(reportsProvider.notifier).setReports(updated);
+    // Immediately remove from campus reports feed
+    ref.read(campusReportsProvider.notifier).removeReport(id);
     ref.invalidate(buildingSummariesProvider);
   }
 }
@@ -156,7 +186,14 @@ class CampusReportsNotifier extends AsyncNotifier<List<ReportModel>> {
     if (ref.read(currentUserProvider)?.id != expectedUserId) {
       return const [];
     }
-    return reports;
+    // Filter out resolved and soft-deleted reports at client level as defense-in-depth
+    return reports
+        .where((r) =>
+            r.status != ReportStatus.resolved &&
+            r.status != ReportStatus.rejected &&
+            r.status != ReportStatus.duplicate &&
+            !r.isDeleted)
+        .toList();
   }
 
   bool _isRefreshing = false;
@@ -174,7 +211,13 @@ class CampusReportsNotifier extends AsyncNotifier<List<ReportModel>> {
       final repo = ref.read(reportsRepositoryProvider);
       final reports = await repo.getNearbyReports(limit: 10);
       if (ref.read(currentUserProvider)?.id == user.id) {
-        state = AsyncValue.data(reports);
+        state = AsyncValue.data(reports
+            .where((r) =>
+                r.status != ReportStatus.resolved &&
+                r.status != ReportStatus.rejected &&
+                r.status != ReportStatus.duplicate &&
+                !r.isDeleted)
+            .toList());
       }
     } catch (e, st) {
       state = AsyncValue.error(e, st);
@@ -183,13 +226,49 @@ class CampusReportsNotifier extends AsyncNotifier<List<ReportModel>> {
     }
   }
 
-  /// Adds a newly created report to the campus reports feed.
+  /// Adds a newly created report to the campus reports feed if active and not deleted.
   void addReport(ReportModel report) {
     final current = state.value ?? const [];
     if (report.status != ReportStatus.resolved &&
         report.status != ReportStatus.rejected &&
-        report.status != ReportStatus.duplicate) {
+        report.status != ReportStatus.duplicate &&
+        !report.isDeleted) {
       state = AsyncValue.data([report, ...current.where((r) => r.id != report.id)]);
+    }
+  }
+
+  /// Immediately removes a report from the active campus feed.
+  void removeReport(String reportId) {
+    final current = state.value ?? const [];
+    state = AsyncValue.data(current.where((r) => r.id != reportId).toList());
+  }
+
+  /// Updates report status and automatically purges it from feed if resolved or deleted.
+  void updateReportStatus(
+    String id,
+    ReportStatus newStatus, {
+    String? resolutionNote,
+    DateTime? deletedAt,
+    String? deletionReason,
+  }) {
+    final current = state.value ?? const [];
+    if (newStatus == ReportStatus.resolved ||
+        newStatus == ReportStatus.rejected ||
+        newStatus == ReportStatus.duplicate ||
+        deletedAt != null) {
+      state = AsyncValue.data(current.where((r) => r.id != id).toList());
+    } else {
+      state = AsyncValue.data(current.map((r) {
+        if (r.id == id) {
+          return r.copyWith(
+            status: newStatus,
+            resolutionNote: resolutionNote,
+            deletedAt: deletedAt,
+            deletionReason: deletionReason,
+          );
+        }
+        return r;
+      }).toList());
     }
   }
 }
@@ -206,10 +285,15 @@ final nearbyReportsProvider = Provider<List<ReportModel>>((ref) {
 
   final combined = <ReportModel>[...campusList];
   for (final r in userReports) {
-    if (!combined.any((c) => c.id == r.id) &&
-        r.status != ReportStatus.resolved &&
+    final existingIdx = combined.indexWhere((c) => c.id == r.id);
+    if (existingIdx >= 0) {
+      if (combined[existingIdx].imageUrl == null && r.imageUrl != null) {
+        combined[existingIdx] = combined[existingIdx].copyWith(imageUrl: r.imageUrl);
+      }
+    } else if (r.status != ReportStatus.resolved &&
         r.status != ReportStatus.rejected &&
-        r.status != ReportStatus.duplicate) {
+        r.status != ReportStatus.duplicate &&
+        !r.isDeleted) {
       combined.add(r);
     }
   }
@@ -218,7 +302,8 @@ final nearbyReportsProvider = Provider<List<ReportModel>>((ref) {
       .where((r) =>
           r.status != ReportStatus.resolved &&
           r.status != ReportStatus.rejected &&
-          r.status != ReportStatus.duplicate)
+          r.status != ReportStatus.duplicate &&
+          !r.isDeleted)
       .take(10)
       .toList();
 });

@@ -36,11 +36,13 @@ final DateFormat _kHomeDateFormat = DateFormat('d MMMM yyyy');
 class StudentHomeScreen extends ConsumerStatefulWidget {
   final VoidCallback onNavigateToReports;
   final VoidCallback? onNavigateToRewards;
+  final bool isActive;
 
   const StudentHomeScreen({
     super.key,
     required this.onNavigateToReports,
     this.onNavigateToRewards,
+    this.isActive = true,
   });
 
   @override
@@ -49,6 +51,7 @@ class StudentHomeScreen extends ConsumerStatefulWidget {
 
 class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
   final ValueNotifier<int> _tipIndex = ValueNotifier<int>(0);
+  Timer? _periodicRefreshTimer;
 
   @override
   void initState() {
@@ -56,6 +59,22 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initPushNotifications();
     });
+    // Automatic periodic background refresh every 30 seconds while Home is active
+    _periodicRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted && widget.isActive) {
+        ref.read(campusReportsProvider.notifier).refresh();
+        ref.read(myReportsProvider.notifier).refresh();
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(StudentHomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // When student navigates back to Home tab, refresh the feed automatically
+    if (widget.isActive && !oldWidget.isActive) {
+      _handleRefresh();
+    }
   }
 
   Future<void> _initPushNotifications() async {
@@ -68,6 +87,7 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
 
   @override
   void dispose() {
+    _periodicRefreshTimer?.cancel();
     _tipIndex.dispose();
     super.dispose();
   }
@@ -1909,7 +1929,10 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
           onTap: () {
             Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (ctx) => ReportDetailScreen(reportId: issue.id),
+                builder: (ctx) => ReportDetailScreen(
+                  reportId: issue.id,
+                  initialReport: issue,
+                ),
               ),
             );
           },
@@ -2014,6 +2037,8 @@ class _StudentHomeScreenState extends ConsumerState<StudentHomeScreen> {
       return Image.network(
         issue.imageUrl!,
         fit: BoxFit.cover,
+        cacheWidth: 168,
+        cacheHeight: 168,
         errorBuilder: (_, __, ___) => _buildNeutralPlaceholder(issue),
         loadingBuilder: (_, child, progress) {
           if (progress == null) return child;

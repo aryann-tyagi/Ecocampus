@@ -80,6 +80,7 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
                 data: (allReports) {
                   final activeReports = allReports
                       .where((r) =>
+                          !r.isDeleted &&
                           r.status != ReportStatus.resolved &&
                           r.status != ReportStatus.rejected &&
                           r.status != ReportStatus.duplicate)
@@ -87,6 +88,7 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
 
                   final resolvedReports = allReports
                       .where((r) =>
+                          r.isDeleted ||
                           r.status == ReportStatus.resolved ||
                           r.status == ReportStatus.rejected ||
                           r.status == ReportStatus.duplicate)
@@ -273,16 +275,20 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
 
   Widget _buildReportCard(BuildContext context, ReportModel report) {
     final dateStr = DateFormat('dd MMM yyyy, h:mm a').format(report.createdAt);
+    final isDeleted = report.isDeleted;
 
     return Container(
       key: ValueKey('report-card-${report.id}'),
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDeleted ? const Color(0xFFF9FAFB) : Colors.white,
         borderRadius: BorderRadius.circular(20),
+        border: isDeleted
+            ? Border.all(color: const Color(0xFFFECACA), width: 1.2)
+            : null,
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF144D37).withValues(alpha: 0.04),
+            color: const Color(0xFF144D37).withValues(alpha: isDeleted ? 0.02 : 0.04),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -332,7 +338,7 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
                         SeverityBadge(severity: report.severity),
                       ],
                     ),
-                    _buildStatusPill(report.status),
+                    _buildStatusPill(report.status, isDeleted: isDeleted),
                   ],
                 ),
 
@@ -373,6 +379,7 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
                             style: AppTextStyles.titleMedium.copyWith(
                               fontWeight: FontWeight.w800,
                               fontSize: 15,
+                              color: isDeleted ? AppColors.inkSecondary : AppColors.inkPrimary,
                             ),
                           ),
                           const SizedBox(height: 4),
@@ -390,6 +397,55 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
                     ),
                   ],
                 ),
+
+                // Deletion Notice Banner if removed by administrator
+                if (isDeleted) ...[
+                  Container(
+                    margin: const EdgeInsets.only(top: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF2F2),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: const Color(0xFFFCA5A5).withValues(alpha: 0.6),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.shield_outlined,
+                              size: 14,
+                              color: Color(0xFFDC2626),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              report.deletedAt != null
+                                  ? 'Removed by Admin on ${DateFormat('dd MMM yyyy').format(report.deletedAt!)}'
+                                  : 'Removed by Admin',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF991B1B),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Reason: ${report.deletionReason?.trim().isNotEmpty == true ? report.deletionReason! : "This report was removed by an administrator."}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF7F1D1D),
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 const Divider(height: 20, color: AppColors.borderLight),
 
@@ -428,7 +484,25 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
     );
   }
 
-  Widget _buildStatusPill(ReportStatus status) {
+  Widget _buildStatusPill(ReportStatus status, {bool isDeleted = false}) {
+    if (isDeleted) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEE2E2),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Text(
+          'Removed by Admin',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF991B1B),
+          ),
+        ),
+      );
+    }
+
     Color bg;
     Color fg;
     switch (status) {

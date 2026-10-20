@@ -83,6 +83,10 @@ export interface ReportItem {
   created_at: string;
   updated_at: string;
 
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  deletion_reason?: string | null;
+
   // Joined relations
   buildings?: { id: string; name: string; slug: string } | null;
   floors?: { id: string; label: string } | null;
@@ -99,6 +103,7 @@ export interface DashboardMetrics {
   inProgress: number;
   resolved: number;
   critical: number;
+  deleted: number;
 }
 
 export interface NotificationItem {
