@@ -11,6 +11,7 @@ interface AnalyzeReportRequest {
   mimeType?: string;
   userDescription?: string;
   requestId?: string;
+  modelOverride?: string; // Optional override for testing/diagnostics
 }
 
 const VALID_CATEGORIES = [
@@ -26,17 +27,22 @@ const VALID_CATEGORIES = [
 const VALID_SEVERITIES = ["low", "medium", "high", "critical"] as const;
 const VALID_CONFIDENCES = ["high", "medium", "low"] as const;
 
-// Primary: Modern high-performance workhorse model with enhanced vision & deep reasoning
-const PRIMARY_MODEL = "gemini-3.8-flash";
-// Secondary Fallback: Verified stable multimodal model with structured JSON support
-const SECONDARY_FALLBACK_MODEL = "gemini-3.6-flash";
-// Tertiary Fallback: High-throughput, cost-effective multimodal model
-const TERTIARY_FALLBACK_MODEL = "gemini-3.5-flash-lite";
+// Verified candidate models cascade in order of availability and stability:
+// 1. gemini-3.5-flash-lite: Active, highly available, low-latency, multimodal
+// 2. gemini-flash-lite-latest: Active Google alias tracking latest flash-lite
+// 3. gemini-3.6-flash: Active ecosystem model (fallback tier)
+// 4. gemini-3.8-flash: High reasoning model (fallback tier when demand normalizes)
+const DEFAULT_MODEL_CASCADE = [
+  "gemini-3.5-flash-lite",
+  "gemini-flash-lite-latest",
+  "gemini-3.6-flash",
+  "gemini-3.8-flash",
+];
 
-const MAX_PRIMARY_ATTEMPTS = 2; // 1 initial + up to 1 retry
-const BASE_RETRY_DELAY_MS = 1000;
-const MAX_RETRY_DELAY_MS = 4000;
-const REQUEST_TIMEOUT_MS = 20000; // 20s per individual attempt for vision models
+// Time budget and limits
+const TOTAL_REQUEST_BUDGET_MS = 26000; // 26s absolute cap for edge function execution
+const PER_ATTEMPT_TIMEOUT_MS = 20000;  // 20s individual model fetch timeout
+const MIN_REMAINING_BUDGET_MS = 5000;   // Minimum time needed to attempt a fallback model
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -55,20 +61,6 @@ function parseRetryAfter(headerValue: string | null): number | null {
     return diff > 0 ? diff : 0;
   }
   return null;
-}
-
-function isRetryableStatus(status: number): boolean {
-  // Transient server errors & temporary overload
-  return status === 503 || status === 504 || status === 502 || status === 500 || status === 429;
-}
-
-function calculateBackoffDelay(attempt: number, retryAfterMs: number | null): number {
-  if (retryAfterMs !== null && retryAfterMs > 0 && retryAfterMs <= MAX_RETRY_DELAY_MS) {
-    return retryAfterMs;
-  }
-  const exponential = BASE_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
-  const jitter = Math.floor(Math.random() * 300) + 100;
-  return Math.min(exponential + jitter, MAX_RETRY_DELAY_MS);
 }
 
 function buildGeminiPayload(
@@ -123,6 +115,8 @@ Core Evidence-Based Rules:
       },
     ],
     generationConfig: {
+      temperature: 0.2,
+      maxOutputTokens: 1024,
       responseMimeType: "application/json",
       responseSchema: {
         type: "OBJECT",
@@ -184,6 +178,8 @@ interface AttemptResult {
     message: string;
   };
   retryable: boolean;
+  isModelOverloaded: boolean;
+  isRateLimited: boolean;
   retryAfterMs: number | null;
 }
 
@@ -192,13 +188,13 @@ async function executeModelCall(
   apiKey: string,
   requestPayload: any,
   correlationId: string,
-  attemptNumber: number
+  timeoutMs: number
 ): Promise<AttemptResult> {
   const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
   const attemptStart = Date.now();
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   let geminiResponse: Response;
   try {
@@ -212,51 +208,66 @@ async function executeModelCall(
     clearTimeout(timeoutId);
     const isTimeout = err instanceof Error && err.name === "AbortError";
     const elapsed = Date.now() - attemptStart;
-    console.error(`[analyze-report] [${correlationId}] Attempt ${attemptNumber} on ${modelId} failed (${elapsed}ms): ${isTimeout ? 'Timeout' : 'Network error'}`);
+    console.warn(`[analyze-report] [${correlationId}] Call to ${modelId} aborted/failed (${elapsed}ms): ${isTimeout ? 'Timeout' : 'Network error'}`);
     return {
       success: false,
       status: isTimeout ? 504 : 503,
       retryable: true,
+      isModelOverloaded: false,
+      isRateLimited: false,
       retryAfterMs: null,
       error: {
         code: isTimeout ? "AI_TIMEOUT" : "AI_UNAVAILABLE",
-        message: isTimeout ? "Gemini request timed out." : "Network error reaching AI provider.",
+        message: isTimeout
+          ? "AI analysis request timed out. You can enter details manually."
+          : "Network error reaching AI provider. You can enter details manually.",
       },
     };
   }
   clearTimeout(timeoutId);
 
   const elapsed = Date.now() - attemptStart;
-  console.log(`[analyze-report] [${correlationId}] Attempt ${attemptNumber} on ${modelId} status: ${geminiResponse.status} (${elapsed}ms)`);
+  console.log(`[analyze-report] [${correlationId}] Model ${modelId} HTTP ${geminiResponse.status} in ${elapsed}ms`);
 
   if (!geminiResponse.ok) {
     const errorText = await geminiResponse.text();
-    console.error(`[analyze-report] [${correlationId}] Model ${modelId} error (${geminiResponse.status}): ${errorText.slice(0, 300)}`);
+    // Log sanitized error (truncate and ensure no secrets leak)
+    console.warn(`[analyze-report] [${correlationId}] Model ${modelId} failed with ${geminiResponse.status}: ${errorText.slice(0, 200)}`);
 
     const retryAfterHeader = geminiResponse.headers.get("retry-after");
     const retryAfterMs = parseRetryAfter(retryAfterHeader);
-    const retryable = isRetryableStatus(geminiResponse.status);
+
+    const is503 = geminiResponse.status === 503;
+    const is429 = geminiResponse.status === 429;
+    const is408 = geminiResponse.status === 408;
+    const is5xx = geminiResponse.status >= 500 && geminiResponse.status < 600;
 
     let errorCode = "AI_PROVIDER_ERROR";
-    let errorMessage = `AI service returned status ${geminiResponse.status}.`;
-    if (geminiResponse.status === 503) {
+    let errorMessage = `AI service returned status ${geminiResponse.status}. Please enter details manually.`;
+
+    if (is503) {
       errorCode = "AI_SERVICE_UNAVAILABLE";
       errorMessage = "AI service is temporarily experiencing high demand. Please try again or continue with manual entry.";
-    } else if (geminiResponse.status === 429) {
+    } else if (is429) {
       errorCode = "RATE_LIMITED";
-      errorMessage = "AI service is currently rate-limited. Please proceed with manual entry.";
+      errorMessage = "AI service rate limit reached. Please proceed with manual entry.";
     } else if (geminiResponse.status === 400) {
       errorCode = "VALIDATION_ERROR";
       errorMessage = "Invalid request format to AI provider.";
     } else if (geminiResponse.status === 401 || geminiResponse.status === 403) {
       errorCode = "AI_UNAVAILABLE";
-      errorMessage = "AI service authentication error.";
+      errorMessage = "AI service authentication error. Please enter details manually.";
+    } else if (geminiResponse.status === 404) {
+      errorCode = "MODEL_NOT_FOUND";
+      errorMessage = `AI model ${modelId} is not available.`;
     }
 
     return {
       success: false,
       status: geminiResponse.status,
-      retryable,
+      retryable: is5xx || is429 || is408,
+      isModelOverloaded: is503,
+      isRateLimited: is429,
       retryAfterMs,
       error: { code: errorCode, message: errorMessage },
     };
@@ -271,6 +282,8 @@ async function executeModelCall(
       success: false,
       status: 502,
       retryable: true,
+      isModelOverloaded: false,
+      isRateLimited: false,
       retryAfterMs: null,
       error: { code: "AI_MALFORMED_OUTPUT", message: "Failed to parse provider response JSON." },
     };
@@ -278,11 +291,13 @@ async function executeModelCall(
 
   const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!rawText) {
-    console.error(`[analyze-report] [${correlationId}] Empty candidate response from ${modelId}`);
+    console.warn(`[analyze-report] [${correlationId}] Empty candidate response from ${modelId}`);
     return {
       success: false,
       status: 502,
       retryable: true,
+      isModelOverloaded: false,
+      isRateLimited: false,
       retryAfterMs: null,
       error: { code: "AI_EMPTY_RESPONSE", message: "AI provider returned empty response." },
     };
@@ -295,14 +310,18 @@ async function executeModelCall(
       status: 200,
       data: parsed,
       retryable: false,
+      isModelOverloaded: false,
+      isRateLimited: false,
       retryAfterMs: null,
     };
   } catch (_) {
-    console.error(`[analyze-report] [${correlationId}] Malformed structured JSON from ${modelId}: ${rawText.slice(0, 200)}`);
+    console.warn(`[analyze-report] [${correlationId}] Malformed structured JSON from ${modelId}: ${rawText.slice(0, 150)}`);
     return {
       success: false,
       status: 502,
       retryable: false,
+      isModelOverloaded: false,
+      isRateLimited: false,
       retryAfterMs: null,
       error: { code: "AI_MALFORMED_OUTPUT", message: "AI output could not be parsed as structured JSON." },
     };
@@ -313,6 +332,20 @@ serve(async (req: Request) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
+  }
+
+  // Diagnostic model probe (authenticated)
+  if (req.method === "GET") {
+    const apiKey = Deno.env.get("GEMINI_API_KEY");
+    if (!apiKey) {
+      return new Response(JSON.stringify({ error: "GEMINI_API_KEY missing" }), { status: 500, headers: corsHeaders });
+    }
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+    const data = await res.json();
+    return new Response(JSON.stringify(data), {
+      status: res.status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   const correlationId = crypto.randomUUID();
@@ -357,7 +390,7 @@ serve(async (req: Request) => {
       );
     }
 
-    const { imageBase64, mimeType = "image/jpeg", userDescription = "" } = body;
+    const { imageBase64, mimeType = "image/jpeg", userDescription = "", modelOverride, modelCascade: customCascade } = body as any;
 
     if (!imageBase64 || imageBase64.trim().length === 0) {
       return new Response(
@@ -415,92 +448,118 @@ serve(async (req: Request) => {
 
     // 4. Construct Multimodal Payload
     const requestPayload = buildGeminiPayload(normalizedMime, imageBase64, userDescription);
-    console.log(`[analyze-report] [${correlationId}] Starting AI issue analysis with primary model ${PRIMARY_MODEL} (${normalizedMime}, ${imageBase64.length} chars).`);
+
+    // 5. Determine Model Execution Cascade
+    const primaryEnv = Deno.env.get("GEMINI_PRIMARY_MODEL")?.trim();
+    let modelCascade: string[];
+
+    if (Array.isArray(customCascade) && customCascade.length > 0) {
+      modelCascade = customCascade;
+    } else if (modelOverride) {
+      modelCascade = [modelOverride];
+    } else if (primaryEnv && !DEFAULT_MODEL_CASCADE.includes(primaryEnv)) {
+      modelCascade = [primaryEnv, ...DEFAULT_MODEL_CASCADE];
+    } else if (primaryEnv) {
+      modelCascade = [primaryEnv, ...DEFAULT_MODEL_CASCADE.filter((m) => m !== primaryEnv)];
+    } else {
+      modelCascade = [...DEFAULT_MODEL_CASCADE];
+    }
+
+    console.log(`[analyze-report] [${correlationId}] Starting analysis pipeline with cascade [${modelCascade.join(", ")}]. Image size: ${imageBase64.length} chars.`);
 
     let finalData: any = null;
-    let modelUsed: string = PRIMARY_MODEL;
-    let isFallback = false;
+    let successfulModel: string = modelCascade[0];
+    let isFallbackUsed = false;
     let lastError: { code: string; message: string } | null = null;
     let lastStatus = 503;
 
-    // 5. Attempt Primary Model with Bounded Retries (Up to 3 total attempts)
-    let primarySuccess = false;
-    for (let attempt = 1; attempt <= MAX_PRIMARY_ATTEMPTS; attempt++) {
-      const res = await executeModelCall(PRIMARY_MODEL, apiKey, requestPayload, correlationId, attempt);
-      if (res.success && res.data) {
-        finalData = res.data;
-        primarySuccess = true;
-        modelUsed = PRIMARY_MODEL;
+    // 6. Execute Model Cascade with Intelligent Failover
+    for (let modelIndex = 0; modelIndex < modelCascade.length; modelIndex++) {
+      const currentModel = modelCascade[modelIndex];
+      const isFirstModel = modelIndex === 0;
+
+      // Check remaining time budget before starting a model attempt
+      const elapsedTotal = Date.now() - startTime;
+      const remainingBudget = TOTAL_REQUEST_BUDGET_MS - elapsedTotal;
+      if (remainingBudget < MIN_REMAINING_BUDGET_MS) {
+        console.warn(`[analyze-report] [${correlationId}] Insufficient remaining time budget (${remainingBudget}ms). Halting cascade.`);
         break;
       }
 
-      lastError = res.error || { code: "AI_SERVICE_UNAVAILABLE", message: "AI service error." };
-      lastStatus = res.status;
+      const attemptTimeout = Math.min(PER_ATTEMPT_TIMEOUT_MS, remainingBudget);
 
-      // If error is NOT retryable (e.g. 400 Bad Request, 401/403 Bad Key), abort retries
-      if (!res.retryable) {
-        console.warn(`[analyze-report] [${correlationId}] Non-retryable status ${res.status} on primary model ${PRIMARY_MODEL}. Aborting primary attempts.`);
+      // Attempt current model
+      let attemptRes = await executeModelCall(
+        currentModel,
+        apiKey,
+        requestPayload,
+        correlationId,
+        attemptTimeout
+      );
+
+      // If call failed with transient 500/502/504 or network error (NOT 503 overload and NOT 429 rate limit),
+      // perform 1 bounded retry with exponential backoff & jitter if time budget permits
+      if (!attemptRes.success && attemptRes.retryable && !attemptRes.isModelOverloaded && !attemptRes.isRateLimited) {
+        const remainingForRetry = TOTAL_REQUEST_BUDGET_MS - (Date.now() - startTime);
+        if (remainingForRetry > MIN_REMAINING_BUDGET_MS + 1000) {
+          const jitterDelay = Math.floor(Math.random() * 300) + 700; // 700-1000ms
+          console.warn(`[analyze-report] [${correlationId}] Transient error on ${currentModel}. Retrying in ${jitterDelay}ms...`);
+          await sleep(jitterDelay);
+
+          attemptRes = await executeModelCall(
+            currentModel,
+            apiKey,
+            requestPayload,
+            correlationId,
+            Math.min(PER_ATTEMPT_TIMEOUT_MS, TOTAL_REQUEST_BUDGET_MS - (Date.now() - startTime))
+          );
+        }
+      }
+
+      if (attemptRes.success && attemptRes.data) {
+        finalData = attemptRes.data;
+        successfulModel = currentModel;
+        isFallbackUsed = !isFirstModel;
         break;
       }
 
-      // If we haven't reached max attempts, backoff and retry
-      if (attempt < MAX_PRIMARY_ATTEMPTS) {
-        const delay = calculateBackoffDelay(attempt, res.retryAfterMs);
-        console.warn(`[analyze-report] [${correlationId}] Primary model returned ${res.status}. Backing off for ${delay}ms before attempt ${attempt + 1}...`);
-        await sleep(delay);
+      // Record error for client reporting if all candidates fail
+      lastError = attemptRes.error || { code: "AI_ERROR", message: "AI analysis failed." };
+      lastStatus = attemptRes.status;
+
+      // If permanent error (e.g., 400 Bad Request, 401/403 Bad API key), abort entire pipeline immediately
+      if (attemptRes.status === 400 || attemptRes.status === 401 || attemptRes.status === 403) {
+        console.warn(`[analyze-report] [${correlationId}] Permanent error ${attemptRes.status} on ${currentModel}. Halting cascade.`);
+        break;
+      }
+
+      // If model returned 503 (Overloaded) or 429 (Rate-Limited), do NOT retry the same model repeatedly.
+      // Immediately proceed to the next healthy model tier in the cascade!
+      if (modelIndex < modelCascade.length - 1) {
+        console.warn(`[analyze-report] [${correlationId}] Model ${currentModel} failed (status ${attemptRes.status}). Advancing to next fallback tier: ${modelCascade[modelIndex + 1]}...`);
       }
     }
 
-    // 6. Attempt Secondary Fallback Model Once if Primary Failed with Transient Error
-    let secondarySuccess = false;
-    if (!primarySuccess && (isRetryableStatus(lastStatus) || lastStatus === 404)) {
-      console.warn(`[analyze-report] [${correlationId}] Primary model ${PRIMARY_MODEL} failed (status ${lastStatus}). Attempting secondary fallback ${SECONDARY_FALLBACK_MODEL}...`);
-      const fallbackRes = await executeModelCall(SECONDARY_FALLBACK_MODEL, apiKey, requestPayload, correlationId, 1);
-      if (fallbackRes.success && fallbackRes.data) {
-        finalData = fallbackRes.data;
-        modelUsed = SECONDARY_FALLBACK_MODEL;
-        isFallback = true;
-        secondarySuccess = true;
-        const totalElapsed = Date.now() - startTime;
-        console.log(`[analyze-report] [${correlationId}] Secondary fallback model ${SECONDARY_FALLBACK_MODEL} succeeded after primary failure. Total elapsed: ${totalElapsed}ms.`);
-      } else {
-        lastError = fallbackRes.error || lastError;
-        lastStatus = fallbackRes.status;
-        console.error(`[analyze-report] [${correlationId}] Secondary fallback model ${SECONDARY_FALLBACK_MODEL} failed with status ${fallbackRes.status}.`);
-      }
-    }
-
-    // 7. Attempt Tertiary Fallback Model Once if Secondary Also Failed with Transient Error
-    if (!primarySuccess && !secondarySuccess && (isRetryableStatus(lastStatus) || lastStatus === 404)) {
-      console.warn(`[analyze-report] [${correlationId}] Secondary fallback model ${SECONDARY_FALLBACK_MODEL} failed (status ${lastStatus}). Attempting tertiary fallback ${TERTIARY_FALLBACK_MODEL}...`);
-      const tertiaryRes = await executeModelCall(TERTIARY_FALLBACK_MODEL, apiKey, requestPayload, correlationId, 1);
-      if (tertiaryRes.success && tertiaryRes.data) {
-        finalData = tertiaryRes.data;
-        modelUsed = TERTIARY_FALLBACK_MODEL;
-        isFallback = true;
-        const totalElapsed = Date.now() - startTime;
-        console.log(`[analyze-report] [${correlationId}] Tertiary fallback model ${TERTIARY_FALLBACK_MODEL} succeeded. Total elapsed: ${totalElapsed}ms.`);
-      } else {
-        lastError = tertiaryRes.error || lastError;
-        lastStatus = tertiaryRes.status;
-        console.error(`[analyze-report] [${correlationId}] Tertiary fallback model ${TERTIARY_FALLBACK_MODEL} also failed with status ${tertiaryRes.status}.`);
-      }
-    }
-
-    // 8. Handle Exhaustion / Service Failure
+    // 7. Handle Complete Service Exhaustion
     if (!finalData) {
       const totalElapsed = Date.now() - startTime;
-      console.error(`[analyze-report] [${correlationId}] All model attempts failed after ${totalElapsed}ms. Final status: ${lastStatus}.`);
-      
-      const responseStatus = isRetryableStatus(lastStatus) ? 503 : lastStatus;
+      console.warn(`[analyze-report] [${correlationId}] All candidate models exhausted in ${totalElapsed}ms. Returning status ${lastStatus}.`);
+
+      // Preserve exact HTTP status contract:
+      // 503 for service overload
+      // 429 for rate limit / exhausted quota
+      // 504 for gateway/request timeout
+      // 400/401/403/500 for respective errors
+      const responseStatus = lastStatus;
+      const errorCode = lastError?.code || (responseStatus === 503 ? "AI_SERVICE_UNAVAILABLE" : "AI_ERROR");
+      const errorMessage = lastError?.message || "AI analysis is temporarily unavailable. Please continue with manual entry.";
+
       return new Response(
         JSON.stringify({
           ok: false,
           error: {
-            code: responseStatus === 503 ? "AI_SERVICE_UNAVAILABLE" : (lastError?.code || "AI_ERROR"),
-            message: responseStatus === 503
-              ? "AI analysis service is temporarily experiencing high demand. Please try again or continue with manual entry."
-              : (lastError?.message || "AI analysis failed. Please continue with manual entry."),
+            code: errorCode,
+            message: errorMessage,
           },
         }),
         {
@@ -510,7 +569,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // 9. Validate and Normalize Structured Model Output
+    // 8. Validate and Normalize Structured Model Output
     let category = (finalData.category || "other").toString().toLowerCase().trim();
     if (!VALID_CATEGORIES.includes(category as any)) {
       category = "other";
@@ -527,18 +586,18 @@ serve(async (req: Request) => {
     }
 
     const result = {
-      issue_title: finalData.issue_title || "Campus Issue",
-      issue_description: finalData.issue_description || userDescription || "Observed campus issue requiring maintenance.",
+      issue_title: (finalData.issue_title || "Campus Issue").toString().trim(),
+      issue_description: (finalData.issue_description || userDescription || "Observed campus issue requiring maintenance.").toString().trim(),
       category: category,
       severity: severity,
-      department: finalData.department || "Campus Facilities",
+      department: (finalData.department || "Campus Facilities").toString().trim(),
       confidence: confidence,
       needs_review: Boolean(finalData.needs_review),
-      reasoning_summary: finalData.reasoning_summary || "Visual analysis of reported incident.",
+      reasoning_summary: (finalData.reasoning_summary || "Visual analysis of reported incident.").toString().trim(),
     };
 
     const totalLatency = Date.now() - startTime;
-    console.log(`[analyze-report] [${correlationId}] Successfully classified via ${modelUsed}${isFallback ? ' (FALLBACK)' : ''}: "${result.issue_title}" [${result.category}/${result.severity}] in ${totalLatency}ms.`);
+    console.log(`[analyze-report] [${correlationId}] Successfully analyzed via ${successfulModel}${isFallbackUsed ? ' (FALLBACK)' : ''}: "${result.issue_title}" [${result.category}/${result.severity}] in ${totalLatency}ms.`);
 
     return new Response(
       JSON.stringify({

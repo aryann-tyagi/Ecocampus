@@ -8,6 +8,10 @@ desktop.ini
 .vscode/
 *.swp
 *.swo
+.clangd
+**/.clangd
+compile_flags.txt
+**/compile_flags.txt
 
 # Intermediate generated artifacts
 reference/ui_ref/

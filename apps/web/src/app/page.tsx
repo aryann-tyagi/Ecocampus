@@ -11,20 +11,30 @@ import {
   UserRole,
 } from '@/types/database';
 import { AdminHeader } from '@/components/features/AdminHeader';
+import { AdminSidebar, PortalSection } from '@/components/features/AdminSidebar';
+import { CampusBanner } from '@/components/features/CampusBanner';
 import { MetricsOverview } from '@/components/features/MetricsOverview';
 import { IssueQueue } from '@/components/features/IssueQueue';
 import { IssueDetailModal } from '@/components/features/IssueDetailModal';
+import { DashboardView } from '@/components/features/DashboardView';
 import { NoticeManagement } from '@/components/features/NoticeManagement';
 import { ChallengeManagement } from '@/components/features/ChallengeManagement';
-import { resolveReportTitle, cn } from '@/lib/utils';
-import { Layers, Megaphone, Trophy } from 'lucide-react';
+import { AnalyticsView } from '@/components/features/AnalyticsView';
+import { UsersView } from '@/components/features/UsersView';
+import { DepartmentsView } from '@/components/features/DepartmentsView';
+import { CategoriesView } from '@/components/features/CategoriesView';
+import { LocationsView } from '@/components/features/LocationsView';
+import { SettingsView } from '@/components/features/SettingsView';
+import { LogsView } from '@/components/features/LogsView';
+import { resolveReportTitle } from '@/lib/utils';
 
 export default function AdminDashboardPage() {
   const router = useRouter();
   const supabase = createClient();
 
-  // Navigation tab state
-  const [activeSection, setActiveSection] = useState<'issues' | 'notices' | 'challenges'>('issues');
+  // Navigation tab state (default to 'issues' matching reference screenshot)
+  const [activeSection, setActiveSection] = useState<PortalSection>('issues');
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   // Auth & Session state
   const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -74,7 +84,7 @@ export default function AdminDashboardPage() {
           return;
         }
 
-        setUserEmail(session.user.email || 'Authenticated User');
+        setUserEmail(session.user.email || 'aryantyagi556@gmail.com');
 
         // Query role from user_roles
         const { data: roleRow } = await supabase
@@ -106,25 +116,25 @@ export default function AdminDashboardPage() {
   }, [router, supabase]);
 
   // 2. Load static reference data (departments & buildings)
-  useEffect(() => {
-    if (isAuthChecking) return;
+  const loadMasterData = useCallback(async () => {
+    try {
+      const [deptRes, buildRes] = await Promise.all([
+        supabase.from('departments').select('*').order('name'),
+        supabase.from('buildings').select('*').order('name'),
+      ]);
 
-    async function loadMasterData() {
-      try {
-        const [deptRes, buildRes] = await Promise.all([
-          supabase.from('departments').select('*').eq('active', true).order('name'),
-          supabase.from('buildings').select('*').eq('active', true).order('name'),
-        ]);
-
-        if (deptRes.data) setDepartments(deptRes.data as Department[]);
-        if (buildRes.data) setBuildings(buildRes.data as Building[]);
-      } catch (err) {
-        console.error('Failed to load master data:', err);
-      }
+      if (deptRes.data) setDepartments(deptRes.data as Department[]);
+      if (buildRes.data) setBuildings(buildRes.data as Building[]);
+    } catch (err) {
+      console.error('Failed to load master data:', err);
     }
+  }, [supabase]);
 
-    loadMasterData();
-  }, [isAuthChecking, supabase]);
+  useEffect(() => {
+    if (!isAuthChecking) {
+      loadMasterData();
+    }
+  }, [isAuthChecking, loadMasterData]);
 
   // 3. Fetch summary metrics derived from real database data
   const loadMetrics = useCallback(async () => {
@@ -230,7 +240,7 @@ export default function AdminDashboardPage() {
         query = query.eq('assigned_department_id', departmentFilter);
       }
 
-      // Apply Search filter on issue_label (the database column), description, and location_details
+      // Apply Search filter on issue_label, description, and location_details
       if (searchQuery.trim()) {
         const q = searchQuery.trim();
         query = query.or(`issue_label.ilike.%${q}%,description.ilike.%${q}%,location_details.ilike.%${q}%`);
@@ -373,12 +383,96 @@ export default function AdminDashboardPage() {
     [reports, supabase]
   );
 
+  // Handle Section selection with staff role boundaries
+  const handleSelectSection = useCallback((section: PortalSection) => {
+    if (userRole === 'staff') {
+      const allowedForStaff: PortalSection[] = ['dashboard', 'issues', 'analytics', 'settings'];
+      if (!allowedForStaff.includes(section)) {
+        setActiveSection('issues');
+        return;
+      }
+    }
+    setActiveSection(section);
+  }, [userRole]);
+
+  // Determine Banner Title & Subtitle based on active module & role
+  const bannerInfo = React.useMemo(() => {
+    const isStaff = userRole === 'staff';
+    const deptName = userDepartment?.name || 'Assigned Department';
+
+    switch (activeSection) {
+      case 'dashboard':
+        return {
+          title: isStaff ? `${deptName} Operations Overview` : 'Campus Operations Overview',
+          subtitle: isStaff
+            ? `Real-time issue queue and resolution status for ${deptName}.`
+            : 'Real-time performance indicators, active queues, and campus sustainability pulse.',
+        };
+      case 'issues':
+        return {
+          title: isStaff ? `${deptName} Issue Queue` : 'Campus Issue Management',
+          subtitle: isStaff
+            ? `Review assigned environmental reports, update progress, and log verified resolutions.`
+            : 'Review, assign, and resolve student environmental reports in real time.',
+        };
+      case 'notices':
+        return {
+          title: 'Campus Notice & Alert Management',
+          subtitle: 'Broadcast alerts, maintenance bulletins, and sustainability notices to student devices.',
+        };
+      case 'challenges':
+        return {
+          title: 'Custom Challenge & EcoPoints Management',
+          subtitle: 'Define verifiable sustainability goals, repeat rules, and configure student EcoPoints rewards.',
+        };
+      case 'analytics':
+        return {
+          title: isStaff ? `${deptName} Analytics` : 'Campus Operational Analytics',
+          subtitle: isStaff
+            ? `Operational performance and resolution metrics for ${deptName}.`
+            : 'Explore category distributions, building hotspots, and resolution trends.',
+        };
+      case 'users':
+        return {
+          title: 'Campus Member & Access Management',
+          subtitle: 'View registered profiles, assign staff department duties, and configure access levels.',
+        };
+      case 'departments':
+        return {
+          title: 'Campus Service Departments',
+          subtitle: 'Manage administrative departments and service teams assigned to campus issues.',
+        };
+      case 'categories':
+        return {
+          title: 'Issue Category Taxonomies',
+          subtitle: 'Core issue classification standards matching EcoCampus PRD taxonomies.',
+        };
+      case 'locations':
+        return {
+          title: 'Campus Buildings & Floor Facilities',
+          subtitle: 'Manage SRM University Sonepat academic blocks, residential towers, and floor plans.',
+        };
+      case 'settings':
+        return {
+          title: isStaff ? 'Staff Account Settings' : 'Operations Portal Configuration',
+          subtitle: isStaff
+            ? `Account credentials and department details for ${deptName}.`
+            : 'System parameters, database connectivity, and administrative settings.',
+        };
+      case 'logs':
+        return {
+          title: 'Operational Audit Log',
+          subtitle: 'Immutable record of issue status transitions, department assignments, and administrator notes.',
+        };
+    }
+  }, [activeSection, userRole, userDepartment]);
+
   if (isAuthChecking) {
     return (
       <div className="min-h-screen bg-[#F8FAF8] flex items-center justify-center p-4">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-3 border-[#144D37] border-t-transparent rounded-full animate-spin" />
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
             Verifying EcoCampus Access...
           </p>
         </div>
@@ -387,143 +481,169 @@ export default function AdminDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAF8] flex flex-col">
-      {/* Top Navbar */}
+    <div className="min-h-screen bg-[#F8FAF8] flex flex-col font-sans">
+      {/* 1. Full-Width Dark Green Header matching screenshot */}
       <AdminHeader
         userEmail={userEmail}
         userRole={userRole}
         userDepartment={userDepartment}
-        activeSection={activeSection}
-        onSectionChange={setActiveSection}
         onSignOut={handleSignOut}
         onSelectReportId={handleSelectReportById}
+        onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
       />
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        {/* Mobile Sub-Navigation Bar */}
-        <div className="flex md:hidden items-center gap-1 bg-white p-1.5 rounded-2xl border border-slate-200 mb-5 shadow-sm">
-          <button
-            onClick={() => setActiveSection('issues')}
-            className={cn(
-              'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all',
-              activeSection === 'issues'
-                ? 'bg-emerald-700 text-white shadow-sm'
-                : 'text-slate-600 hover:bg-slate-100'
-            )}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            Issues
-          </button>
+      {/* 2. Main Portal Container with Persistent Left Sidebar */}
+      <div className="flex-1 flex w-full">
+        {/* Left Sidebar */}
+        <AdminSidebar
+          activeSection={activeSection}
+          onSelectSection={handleSelectSection}
+          isOpenMobile={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
+          userRole={userRole}
+        />
 
-          {userRole === 'admin' && (
+        {/* Center / Right Content View */}
+        <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-7 max-w-7xl mx-auto w-full">
+          {/* Wide Campus Building Banner */}
+          <CampusBanner
+            title={bannerInfo.title}
+            subtitle={bannerInfo.subtitle}
+            eyebrow="OPERATIONS PORTAL"
+            isDbConnected={true}
+          />
+
+          {/* SECTION: ISSUES (Primary Redesigned Page) */}
+          {activeSection === 'issues' && (
             <>
-              <button
-                onClick={() => setActiveSection('notices')}
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all',
-                  activeSection === 'notices'
-                    ? 'bg-emerald-700 text-white shadow-sm'
-                    : 'text-slate-600 hover:bg-slate-100'
-                )}
-              >
-                <Megaphone className="w-3.5 h-3.5" />
-                Notices
-              </button>
+              {/* 7 Metric Cards & Status Distribution Visualizer */}
+              <MetricsOverview
+                metrics={metrics}
+                selectedStatus={statusFilter}
+                onSelectStatus={(status) => setStatusFilter(status)}
+                onViewAnalytics={() => setActiveSection('analytics')}
+                isLoading={isLoadingMetrics}
+              />
 
-              <button
-                onClick={() => setActiveSection('challenges')}
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all',
-                  activeSection === 'challenges'
-                    ? 'bg-emerald-700 text-white shadow-sm'
-                    : 'text-slate-600 hover:bg-slate-100'
-                )}
-              >
-                <Trophy className="w-3.5 h-3.5" />
-                Challenges
-              </button>
+              {/* Search, Filter Toolbar, Table with Thumbnails & Actions */}
+              <IssueQueue
+                reports={reports}
+                departments={departments}
+                buildings={buildings}
+                selectedReportId={selectedReport?.id || null}
+                onSelectReport={(report) => setSelectedReport(report)}
+                isLoading={isLoadingReports}
+                error={error}
+                userRole={userRole}
+                onRefresh={() => {
+                  loadMetrics();
+                  loadReports();
+                }}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                statusFilter={statusFilter}
+                onStatusFilterChange={setStatusFilter}
+                categoryFilter={categoryFilter}
+                onCategoryFilterChange={setCategoryFilter}
+                severityFilter={severityFilter}
+                onSeverityFilterChange={setSeverityFilter}
+                buildingFilter={buildingFilter}
+                onBuildingFilterChange={setBuildingFilter}
+                departmentFilter={departmentFilter}
+                onDepartmentFilterChange={setDepartmentFilter}
+                onResetFilters={handleResetFilters}
+              />
             </>
           )}
-        </div>
 
-        {/* Section Header */}
-        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div>
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-              {activeSection === 'issues'
-                ? 'Campus Issue Management'
-                : activeSection === 'notices'
-                ? 'Campus Notice & Announcement Management'
-                : 'Custom Challenge & EcoPoints Management'}
-            </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {activeSection === 'issues'
-                ? 'Review, assign, and resolve student environmental reports in real time.'
-                : activeSection === 'notices'
-                ? 'Create, edit, draft, preview, and broadcast campus notices and alerts to student devices.'
-                : 'Define verifiable sustainability goals, repeat rules, and configure exact student EcoPoints rewards.'}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs font-medium text-slate-500 self-start sm:self-auto bg-white px-3 py-1.5 rounded-xl border border-slate-200">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Database Live Connection</span>
-          </div>
-        </div>
-
-        {/* SECTION 1: ISSUES QUEUE */}
-        {activeSection === 'issues' && (
-          <>
-            {/* Real-time Summary Metrics */}
-            <MetricsOverview
+          {/* SECTION: DASHBOARD */}
+          {activeSection === 'dashboard' && (
+            <DashboardView
               metrics={metrics}
-              selectedStatus={statusFilter}
-              onSelectStatus={(status) => setStatusFilter(status)}
-              isLoading={isLoadingMetrics}
-            />
-
-            {/* Issue Management Queue */}
-            <IssueQueue
               reports={reports}
               departments={departments}
-              buildings={buildings}
-              selectedReportId={selectedReport?.id || null}
-              onSelectReport={(report) => setSelectedReport(report)}
-              isLoading={isLoadingReports}
-              error={error}
+              onNavigateToIssues={(filter) => {
+                setStatusFilter(filter || '');
+                setActiveSection('issues');
+              }}
+              onNavigateToNotices={() => setActiveSection('notices')}
+              onNavigateToAnalytics={() => setActiveSection('analytics')}
+            />
+          )}
+
+          {/* SECTION: NOTICES */}
+          {activeSection === 'notices' && <NoticeManagement buildings={buildings} />}
+
+          {/* SECTION: CHALLENGES */}
+          {activeSection === 'challenges' && <ChallengeManagement buildings={buildings} />}
+
+          {/* SECTION: ANALYTICS */}
+          {activeSection === 'analytics' && (
+            <AnalyticsView reports={reports} buildings={buildings} metrics={metrics} />
+          )}
+
+          {/* SECTION: USERS */}
+          {activeSection === 'users' && (
+            <UsersView departments={departments} currentUserRole={userRole} />
+          )}
+
+          {/* SECTION: DEPARTMENTS */}
+          {activeSection === 'departments' && (
+            <DepartmentsView
+              departments={departments}
+              reports={reports}
               userRole={userRole}
               onRefresh={() => {
-                loadMetrics();
+                loadMasterData();
                 loadReports();
               }}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              statusFilter={statusFilter}
-              onStatusFilterChange={setStatusFilter}
-              categoryFilter={categoryFilter}
-              onCategoryFilterChange={setCategoryFilter}
-              severityFilter={severityFilter}
-              onSeverityFilterChange={setSeverityFilter}
-              buildingFilter={buildingFilter}
-              onBuildingFilterChange={setBuildingFilter}
-              departmentFilter={departmentFilter}
-              onDepartmentFilterChange={setDepartmentFilter}
-              onResetFilters={handleResetFilters}
             />
-          </>
-        )}
+          )}
 
-        {/* SECTION 2: CAMPUS NOTICES */}
-        {activeSection === 'notices' && (
-          <NoticeManagement buildings={buildings} />
-        )}
+          {/* SECTION: CATEGORIES */}
+          {activeSection === 'categories' && (
+            <CategoriesView
+              reports={reports}
+              onSelectCategoryFilter={(cat) => {
+                setCategoryFilter(cat);
+                setActiveSection('issues');
+              }}
+            />
+          )}
 
-        {/* SECTION 3: CUSTOM CHALLENGES */}
-        {activeSection === 'challenges' && (
-          <ChallengeManagement buildings={buildings} />
-        )}
-      </main>
+          {/* SECTION: LOCATIONS */}
+          {activeSection === 'locations' && (
+            <LocationsView
+              buildings={buildings}
+              reports={reports}
+              userRole={userRole}
+              onRefresh={() => {
+                loadMasterData();
+                loadReports();
+              }}
+            />
+          )}
+
+          {/* SECTION: SETTINGS */}
+          {activeSection === 'settings' && (
+            <SettingsView
+              userEmail={userEmail}
+              userRole={userRole}
+              userDepartment={userDepartment}
+            />
+          )}
+
+          {/* SECTION: LOGS */}
+          {activeSection === 'logs' && (
+            <LogsView
+              onSelectReportId={(repId) => {
+                handleSelectReportById(repId);
+                setActiveSection('issues');
+              }}
+            />
+          )}
+        </main>
+      </div>
 
       {/* Detail / Action Modal Drawer */}
       {selectedReport && (
